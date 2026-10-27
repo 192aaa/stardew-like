@@ -32,6 +32,32 @@ func near(p: Vector2) -> bool:
 	return false
 
 
+## 存档/联机：矿岩快照
+func payload() -> Array:
+	var out: Array = []
+	for o in _ores:
+		var pos2: Vector2 = o.pos
+		out.append([String(o.kind), pos2.x, pos2.y, int(o.hp)])
+	return out
+
+
+## 存档/联机：恢复矿岩（清空重建）
+func restore(arr: Array) -> void:
+	for o in _ores:
+		(o.spr as Sprite2D).queue_free()
+	_ores.clear()
+	for row in arr:
+		var kind := String(row[0])
+		if not TEX_ORES.has(kind):
+			continue
+		var spr := Sprite2D.new()
+		spr.texture = TEX_ORES[kind]
+		spr.position = Vector2(float(row[1]), float(row[2]))
+		add_child(spr)
+		_ores.append({"kind": kind, "pos": spr.position,
+				"hp": clampi(int(row[3]), 1, 3), "spr": spr})
+
+
 ## 敲击最近的矿岩：返回 {result: "none"/"hit"/"break", kind: String}
 func hit_at(p: Vector2) -> Dictionary:
 	var best = null

@@ -211,6 +211,17 @@ var _gift_rows := {}      # item id -> [持有 Label, 按钮]
 var _gift_villager_id := ""
 var _gifted_today := {}   # {村民id: 今日已送礼次数}，不存档
 
+# 联机（Net autoload）
+var _shadow: Node2D = null   # 对方玩家影子精灵
+var _snap_t := 0.0           # 10Hz 快照/位置播报计时
+var _pf_t := 0.0             # host 周期全量推送计时
+var _full_t := 0.0           # 全量推送防抖
+var _remote_exec := false    # host 正在替 guest 执行动作（抑制面板与二次转发）
+var _guest_sleeping := false # guest 本地睡觉演出，等 host 全量数据落地
+var _boot_panel: PanelContainer
+var _boot_status: Label
+var _boot_input: LineEdit
+
 
 func _ready() -> void:
 	_ui_font = SystemFont.new()
@@ -260,11 +271,17 @@ func _ready() -> void:
 		_toggle_help(true)
 		_toast("欢迎回来！锄地(1) 浇水(2) 种地，7 鱼竿 8 斧镐，C 制作，H 帮助")
 	_refresh_festival()
+	Net.net_message.connect(_on_net_msg)
+	Net.net_error.connect(_on_net_error)
+	Net.peer_joined.connect(_on_peer_joined)
+	Net.peer_left.connect(_on_peer_left)
+	if OS.get_environment("SL_UITEST") == "":
+		_build_boot()
 
 
 func _process(delta: float) -> void:
 	_wt += delta
-	if not sleeping:
+	if not sleeping and not Net.is_guest():
 		time_min += delta * MINUTES_PER_SECOND
 		if time_min >= DAY_END_MIN:
 			_do_sleep(true)
@@ -282,6 +299,7 @@ func _process(delta: float) -> void:
 		_toggle_dialog(false)
 	Music.update_phase(time_min, weather == "rain")
 	_update_fishing(delta)
+	_net_tick(delta)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -320,10 +338,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("help"):
 		_toggle_help(not help_open)
 	elif event.is_action_pressed("save_game"):
-		if not sleeping:
+		if not sleeping and not Net.is_guest():
 			_do_save()
 	elif event.is_action_pressed("load_game"):
-		if not sleeping:
+		if not sleeping and not Net.is_guest():
 			_do_load()
 	elif event.is_action_pressed("use"):
 		if help_open:
@@ -341,50 +359,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif dialog_open:
 			_toggle_dialog(false)
 		elif place_mode != "":
-			_place_at_target()
+			if Net.is_guest():
+				_guest_place_intent()
+			else:
+				_place_at_target()
 		elif shop_open:
 			_toggle_shop(false)
 		else:
 			_use_tool()
 	elif event.is_action_pressed("interact"):
-		if help_open:
-			_toggle_help(false)
-		elif dex_open:
-			_toggle_dex(false)
-		elif orders_open:
-			_toggle_orders(false)
-		elif shop_open:
-			_toggle_shop(false)
-		elif craft_open:
-			_toggle_craft(false)
-		elif cook_open:
-			_toggle_cook(false)
-		elif gift_open:
-			_toggle_gift(false)
-		elif dialog_open:
-			_toggle_dialog(false)
-		elif _near_pet() != null:
-			_pet_pet(_near_pet())
-		elif _near_villager() != null:
-			_open_gift(_near_villager())
-		elif gather.pick_berry(player.position) > 0:
-			player.pop()
-			Game.add_xp("gather", 4)
-			Sfx.play("pick")
-			_float_text("+野莓", player.position + Vector2(0, -30), Color(1, 0.55, 0.5))
-			_toast("摘到了野莓！已放进背包，明天会再结果")
-		elif player.position.distance_to(decor.BOARD_POS) < 70.0:
-			_toggle_orders(true)
-		elif player.position.distance_to(decor.COOP_POS) < 80.0:
-			_collect_eggs()
-		elif player.position.distance_to(decor.BARN_POS) < 90.0:
-			_collect_barn()
-		elif player.position.distance_to(decor.SHOP_POS) < 90.0:
-			_toggle_shop(true)
-		elif player.position.distance_to(decor.DOOR_POS) < 80.0 and not sleeping:
-			_do_sleep(false)
-		elif _machine_near() != null:
-			_machine_interact(_machine_near())
+		_interact_chain()
 	elif event.is_action_pressed("ui_cancel"):
 		if help_open:
 			_toggle_help(false)
@@ -409,6 +393,83 @@ func _unhandled_input(event: InputEvent) -> void:
 			and not orders_open and not dex_open and place_mode == "" \
 			and not cook_open and not gift_open:
 		_use_tool()
+
+
+# ---------- E 键交互链 ----------
+
+## E 键交互链：面板开关 / 摘野莓 / 收蛋收奶 / 摸宠 / 睡觉 / 机器
+## 联机时 guest 的突变动作改为发意图，由 host 执行后回推全量
+func _interact_chain() -> void:
+	if help_open:
+		_toggle_help(false)
+	elif dex_open:
+		_toggle_dex(false)
+	elif orders_open:
+		_toggle_orders(false)
+	elif shop_open:
+		_toggle_shop(false)
+	elif craft_open:
+		_toggle_craft(false)
+	elif cook_open:
+		_toggle_cook(false)
+	elif gift_open:
+		_toggle_gift(false)
+	elif dialog_open:
+		_toggle_dialog(false)
+	elif _near_pet() != null:
+		if Net.is_guest():
+			Net.send({t = "intent", k = "pet", d = {"kind": _near_pet().kind}})
+		else:
+			_pet_pet(_near_pet())
+	elif _near_villager() != null and not _remote_exec:
+		_open_gift(_near_villager())
+	elif _berry_try() > 0:
+		player.pop()
+		if Net.is_guest():
+			Net.send({t = "intent", k = "berry",
+					d = {"pos": [player.position.x, player.position.y]}})
+		else:
+			Game.add_xp("gather", 4)
+		Sfx.play("pick")
+		_float_text("+野莓", player.position + Vector2(0, -30), Color(1, 0.55, 0.5))
+		_toast("摘到了野莓！已放进背包，明天会再结果")
+	elif player.position.distance_to(decor.BOARD_POS) < 70.0 and not _remote_exec:
+		_toggle_orders(true)
+	elif player.position.distance_to(decor.COOP_POS) < 80.0:
+		if Net.is_guest():
+			Net.send({t = "intent", k = "eggs", d = {}})
+		else:
+			_collect_eggs()
+	elif player.position.distance_to(decor.BARN_POS) < 90.0:
+		if Net.is_guest():
+			Net.send({t = "intent", k = "barn", d = {}})
+		else:
+			_collect_barn()
+	elif player.position.distance_to(decor.SHOP_POS) < 90.0 and not _remote_exec:
+		_toggle_shop(true)
+	elif player.position.distance_to(decor.DOOR_POS) < 80.0 and not sleeping:
+		if Net.is_guest():
+			_guest_sleep_start()
+		else:
+			_do_sleep(false)
+	elif _machine_near() != null:
+		var m: Dictionary = _machine_near()
+		if m.data.type == "stove":
+			if not _remote_exec:
+				Sfx.play("plant")
+				_toggle_cook(true)
+		elif Net.is_guest():
+			Net.send({t = "intent", k = "machine",
+					d = {"cx": m.cell.x, "cy": m.cell.y}})
+		else:
+			_machine_interact(m)
+
+
+## 摘野莓：本地/host 真摘（入背包），guest 只做视觉（入账走意图）
+func _berry_try() -> int:
+	if Net.is_guest():
+		return 1 if gather.pick_berry_visual(player.position) else 0
+	return gather.pick_berry(player.position)
 
 
 # ---------- 工具与动作 ----------
@@ -451,6 +512,14 @@ func _area_cells(center: Vector2i, level: int) -> Array:
 
 
 func _use_tool() -> void:
+	if Net.is_guest() and current_tool != Tool.ROD:
+		# 联机：guest 的工具动作发意图由 host 结算（鱼竿小游戏本地自打）
+		Net.send({t = "intent", k = "tool", d = {
+			"tool": current_tool,
+			"pos": [player.position.x, player.position.y],
+			"fx": player.facing.x, "fy": player.facing.y,
+		}})
+		return
 	if current_tool == Tool.ROD:
 		_fishing_action()
 		return
@@ -725,26 +794,53 @@ func _pick_fish() -> String:
 
 func _land_fish() -> void:
 	_end_fishing()
-	# 12% 概率钓上宝箱：金币或材料大礼
-	if randf() < 0.12:
-		Game.chest_opened += 1
-		if randf() < 0.5:
-			var g: int = [100, 150, 200, 300, 400][randi() % 5]
-			Game.add_gold(g)
-			_toast("钓上来一个宝箱！打开获得 %d 金币！" % g)
-			_float_text("+%d 金币" % g, player.position + Vector2(0, -34), Color(1, 0.9, 0.35))
+	if Net.is_guest():
+		# 联机：钓获由主机入账，本地只等 evt 表现反馈
+		if randf() < 0.12:
+			if randf() < 0.5:
+				Net.send({t = "intent", k = "fish", d = {"kind": "chest_g",
+						"g": [100, 150, 200, 300, 400][randi() % 5]}})
+			else:
+				Net.send({t = "intent", k = "fish", d = {"kind": "chest_i",
+						"id": ["wood", "stone", "berry"][randi() % 3], "n": 2 + randi() % 3}})
 		else:
-			var mat: String = ["wood", "stone", "berry"][randi() % 3]
-			var n := 2 + randi() % 3
-			Game.add_item(mat, n)
-			_toast("钓上来一个宝箱！打开获得%s x%d" % [Game.MATERIALS[mat].name, n])
-			_float_text("+%d %s" % [n, Game.MATERIALS[mat].name],
-					player.position + Vector2(0, -34), Color(1, 0.9, 0.35))
-		Game.add_xp("fish", 8)
-		Sfx.play("coin")
-		player.pop()
+			Net.send({t = "intent", k = "fish", d = {"kind": "fish", "id": _hooked_id}})
 		return
-	var pick: String = _hooked_id
+	if randf() < 0.12:
+		# 12% 概率钓上宝箱：金币或材料大礼
+		if randf() < 0.5:
+			_apply_chest_gold([100, 150, 200, 300, 400][randi() % 5])
+		else:
+			_apply_chest_item(["wood", "stone", "berry"][randi() % 3], 2 + randi() % 3)
+		return
+	_apply_fish(_hooked_id)
+
+
+## 宝箱·金币结算
+func _apply_chest_gold(g: int) -> void:
+	Game.chest_opened += 1
+	Game.add_gold(g)
+	_toast("钓上来一个宝箱！打开获得 %d 金币！" % g)
+	_float_text("+%d 金币" % g, player.position + Vector2(0, -34), Color(1, 0.9, 0.35))
+	Game.add_xp("fish", 8)
+	Sfx.play("coin")
+	player.pop()
+
+
+## 宝箱·材料结算
+func _apply_chest_item(mat: String, n: int) -> void:
+	Game.chest_opened += 1
+	Game.add_item(mat, n)
+	_toast("钓上来一个宝箱！打开获得%s x%d" % [Game.MATERIALS[mat].name, n])
+	_float_text("+%d %s" % [n, Game.MATERIALS[mat].name],
+			player.position + Vector2(0, -34), Color(1, 0.9, 0.35))
+	Game.add_xp("fish", 8)
+	Sfx.play("coin")
+	player.pop()
+
+
+## 钓到鱼的入账结算
+func _apply_fish(pick: String) -> void:
 	var first: bool = Game.mark_fish(pick)
 	Game.add_item(pick, 1)
 	Game.add_xp("fish", 30 if pick == "legend" else 10)
@@ -822,11 +918,17 @@ func _save_payload() -> Dictionary:
 		"achievements": Game.achievements.keys(),
 		"gift_milestones": Game.gift_milestones,
 		"total_cooked": Game.total_cooked, "gift_count": Game.gift_count,
+		"rocks": mine.payload(),
 	}
 
 
 func _apply_payload(d: Dictionary) -> void:
 	_loading = true
+	if Net.is_guest():
+		# 联机：guest 的位置与工具选择本地保留，其余以 host 全量为准
+		d["px"] = player.position.x
+		d["py"] = player.position.y
+		d["tool"] = current_tool
 	Game.day = int(d.get("day", 1))
 	Game.gold = int(d.get("gold", 500))
 	var seeds: Dictionary = d.get("seeds", {})
@@ -911,6 +1013,7 @@ func _apply_payload(d: Dictionary) -> void:
 	player.position = Vector2(
 		float(d.get("px", decor.DOOR_POS.x)),
 		float(d.get("py", decor.DOOR_POS.y + 44.0)))
+	mine.restore(d.get("rocks", []))
 	farm.restore_from(d)
 	_sync_chickens()
 	_sync_livestock()
@@ -921,6 +1024,10 @@ func _apply_payload(d: Dictionary) -> void:
 	_refresh_eggs()
 	_refresh_festival()
 	Game.check_achievements(true)  # 旧档补录成就，静默不弹提示
+	if orders_open:
+		_refresh_orders()
+	if dex_open:
+		_refresh_dex()
 	_loading = false
 	Game.state_changed.emit()
 
@@ -987,23 +1094,10 @@ func _refresh_festival() -> void:
 
 
 func _do_sleep(passed_out: bool) -> void:
-	if sleeping:
+	if sleeping or Net.is_guest():
 		return
 	sleeping = true
-	if shop_open:
-		_toggle_shop(false)
-	if craft_open:
-		_toggle_craft(false)
-	if help_open:
-		_toggle_help(false)
-	if orders_open:
-		_toggle_orders(false)
-	if dex_open:
-		_toggle_dex(false)
-	if cook_open:
-		_toggle_cook(false)
-	if gift_open:
-		_toggle_gift(false)
+	_close_panels()
 	if fish_state > 0:
 		_end_fishing()
 	place_mode = ""
@@ -1089,6 +1183,45 @@ func _do_sleep(passed_out: bool) -> void:
 		_toast("%s你累倒了……醒来已是第 %d 天%s%s%s" % [head, Game.day, rtail, fest_msg, tail])
 	else:
 		_toast("%s睡了个好觉！第 %d 天，体力已回满%s%s%s" % [head, Game.day, rtail, fest_msg, tail])
+	if Net.is_host():
+		_net_full_now()  # 联机：把新的一天全量同步给 guest
+
+
+## 关闭所有已打开的面板（睡觉/联机读档前调用）
+func _close_panels() -> void:
+	if shop_open:
+		_toggle_shop(false)
+	if craft_open:
+		_toggle_craft(false)
+	if help_open:
+		_toggle_help(false)
+	if orders_open:
+		_toggle_orders(false)
+	if dex_open:
+		_toggle_dex(false)
+	if cook_open:
+		_toggle_cook(false)
+	if gift_open:
+		_toggle_gift(false)
+	if dialog_open:
+		_toggle_dialog(false)
+
+
+## 联机 guest 睡觉：本地只做黑屏演出，天亮数据等 host 全量同步
+func _guest_sleep_start() -> void:
+	if sleeping:
+		return
+	sleeping = true
+	_close_panels()
+	if fish_state > 0:
+		_end_fishing()
+	place_mode = ""
+	farm.set_preview("", Vector2i.ZERO, false)
+	player.set_physics_process(false)
+	Net.send({t = "intent", k = "sleep", d = {}})
+	_guest_sleeping = true
+	var tw := create_tween()
+	tw.tween_property(fade, "color:a", 1.0, 0.7)
 
 
 func _sky_color(t: float) -> Color:
@@ -1251,6 +1384,9 @@ func _add_item_row(vb: VBoxContainer, cat: Dictionary, id: String) -> void:
 
 
 func _buy(id: String) -> void:
+	if Net.is_guest():
+		Net.send({t = "intent", k = "buy", d = {"id": id}})
+		return
 	var cost: int = Game.CROPS[id].seed_cost
 	if Game.gold < cost:
 		_toast("金币不足！")
@@ -1262,6 +1398,9 @@ func _buy(id: String) -> void:
 
 
 func _sell(id: String, all: bool) -> void:
+	if Net.is_guest():
+		Net.send({t = "intent", k = "sell", d = {"id": id, "all": all}})
+		return
 	var have: int = Game.harvest[id]
 	if have <= 0:
 		_toast("没有可出售的%s" % Game.CROPS[id].name)
@@ -1274,6 +1413,9 @@ func _sell(id: String, all: bool) -> void:
 
 
 func _sell_item(cat: Dictionary, id: String, all: bool) -> void:
+	if Net.is_guest():
+		Net.send({t = "intent", k = "sell_item", d = {"id": id, "all": all}})
+		return
 	var have: int = Game.items.get(id, 0)
 	if have <= 0:
 		_toast("背包里没有%s" % cat[id].name)
@@ -1286,6 +1428,9 @@ func _sell_item(cat: Dictionary, id: String, all: bool) -> void:
 
 
 func _upgrade(which: String) -> void:
+	if Net.is_guest():
+		Net.send({t = "intent", k = "buy", d = {"id": which}})
+		return
 	var lv: int = Game.hoe_level if which == "hoe" else Game.can_level
 	if lv >= 4:
 		return
@@ -1345,6 +1490,9 @@ func _upgrade(which: String) -> void:
 
 ## 商店领养宠物（猫/狗各一只）
 func _adopt_pet(kind: String) -> void:
+	if Net.is_guest():
+		Net.send({t = "intent", k = "buy", d = {"id": kind}})
+		return
 	if Game.pets.has(kind):
 		_toast("已经领养过%s啦" % ("小猫" if kind == "cat" else "小狗"))
 		return
@@ -1555,6 +1703,9 @@ func _toggle_cook(open: bool) -> void:
 
 ## 烹饪一道料理：原料够即做（原料可来自背包或谷仓作物），成品进背包
 func _cook_dish(id: String) -> void:
+	if Net.is_guest():
+		Net.send({t = "intent", k = "cook", d = {"id": id}})
+		return
 	var d: Dictionary = Game.DISHES[id]
 	for k in d.cost:
 		if _stock_of(k) < int(d.cost[k]):
@@ -1579,6 +1730,9 @@ func _take_one_n(id: String, n: int) -> void:
 
 ## 吃料理回体力（不超上限）
 func _eat_dish(id: String) -> void:
+	if Net.is_guest():
+		Net.send({t = "intent", k = "eat", d = {"id": id}})
+		return
 	if int(Game.items.get(id, 0)) <= 0:
 		_toast("背包里没有%s，先烹饪一份吧" % Game.DISHES[id].name)
 		return
@@ -1706,12 +1860,17 @@ func _toggle_gift(open: bool) -> void:
 
 ## 送礼面板里点「聊天」：走原对话逻辑
 func _gift_chat() -> void:
+	var who := _gift_villager_id
+	_toggle_gift(false)
+	if Net.is_guest():
+		if who != "":
+			Net.send({t = "intent", k = "chat", d = {"who": who}})
+		return
 	var target: Node2D = null
 	for v in _villagers:
-		if _gift_villager_id != "" and _villager_id_of(v) == _gift_villager_id:
+		if who != "" and _villager_id_of(v) == who:
 			target = v
 			break
-	_toggle_gift(false)
 	if target != null:
 		_talk_to(target)
 
@@ -1725,9 +1884,21 @@ func _villager_id_of(v: Node2D) -> String:
 
 ## 送出 1 份礼物：好感 = 售价/10（上限 8），每日限次，里程碑回赠
 func _give_gift(id: String) -> void:
-	if _gift_villager_id == "":
+	if Net.is_guest():
+		if _gift_villager_id != "":
+			# 本地乐观计数，host 结算后全量同步
+			_gifted_today[_gift_villager_id] = int(_gifted_today.get(_gift_villager_id, 0)) + 1
+			_open_gift_refresh()
+		Net.send({t = "intent", k = "gift",
+				d = {"who": _gift_villager_id, "id": id}})
 		return
-	var who := _gift_villager_id
+	_give_gift_to(_gift_villager_id, id)
+
+
+## 送礼入账核心（本地与 host 意图共用）
+func _give_gift_to(who: String, id: String) -> void:
+	if who == "":
+		return
 	var gifted: int = int(_gifted_today.get(who, 0))
 	if gifted >= Game.GIFT_DAILY:
 		_toast("%s今天收够了礼物，明天再来吧" % VILLAGER_NAMES[who])
@@ -1754,7 +1925,7 @@ func _give_gift(id: String) -> void:
 	_gift_milestone_check(who)
 	Game.state_changed.emit()
 	# 刷新面板标题里的计数
-	if gift_open:
+	if gift_open and not _remote_exec:
 		_open_gift_refresh()
 
 
@@ -1868,29 +2039,47 @@ func _place_at_target() -> void:
 	if cell_v == null:
 		_toast("要在农场范围内放置")
 		return
-	var cell: Vector2i = cell_v
+	_place_at_cell(place_mode, cell_v)
+
+
+## 联机 guest：把放置动作打包成意图发给 host（本地只清预览）
+func _guest_place_intent() -> void:
+	var cell_v = farm.cell_at(player.position + player.facing * 26.0)
+	if cell_v == null:
+		cell_v = farm.cell_at(player.position)
+	if cell_v == null:
+		_toast("要在农场范围内放置")
+		return
+	Net.send({t = "intent", k = "place",
+			d = {"mode": place_mode, "cx": cell_v.x, "cy": cell_v.y}})
+	place_mode = ""
+	farm.set_preview("", Vector2i.ZERO, false)
+
+
+## 在指定格子放置（本地与 host 意图共用）
+func _place_at_cell(mode: String, cell: Vector2i) -> void:
 	var msg: String
-	if place_mode == "scarecrow":
+	if mode == "scarecrow":
 		msg = farm.place_scarecrow(cell)
-	elif place_mode == "sprinkler":
+	elif mode == "sprinkler":
 		msg = farm.place_sprinkler(cell)
-	elif place_mode == "sprinkler2":
+	elif mode == "sprinkler2":
 		msg = farm.place_sprinkler2(cell)
-	elif place_mode != "fertilizer":
-		msg = farm.place_machine(cell, place_mode)
+	elif mode != "fertilizer":
+		msg = farm.place_machine(cell, mode)
 	else:
 		msg = farm.try_fertilize(cell)
 	if msg != "":
 		_toast(msg)
 		return
-	Game.consume(Game.RECIPES[place_mode].cost)
+	Game.consume(Game.RECIPES[mode].cost)
 	Sfx.play("plant")
-	if place_mode == "fertilizer":
+	if mode == "fertilizer":
 		var cn: String = farm.tiles[cell].crop
 		_float_text("+1 节 %s" % Game.CROPS[cn].name, _cell_center(cell), Color(0.6, 1, 0.5))
 		_toast("施了速效肥，%s马上长大了一截！" % Game.CROPS[cn].name)
 	else:
-		_toast("%s放置成功！" % Game.RECIPES[place_mode].name)
+		_toast("%s放置成功！" % Game.RECIPES[mode].name)
 	place_mode = ""
 	farm.set_preview("", Vector2i.ZERO, false)
 	player.pop()
@@ -1943,11 +2132,17 @@ func _near_villager() -> Node2D:
 
 
 func _talk_to(v: Node2D) -> void:
-	var id := ""
-	for cfg in VILLAGERS:
-		if cfg.name == v.display_name:
-			id = cfg.id
-			break
+	var id := _villager_id_of(v)
+	var line := _chat_core(id)
+	_dialog_villager = v
+	_dialog_name.text = "%s · 好感 %d" % [v.display_name, Game.friends[id]]
+	_dialog_text.text = line
+	_toggle_dialog(true)
+	Sfx.play("talk")
+
+
+## 聊天逻辑核心（好感 +10 每日一次）；返回台词
+func _chat_core(id: String) -> String:
 	var first: bool = not _talked_today.get(id, false)
 	_talked_today[id] = true
 	var lv := int(Game.friends.get(id, 0))
@@ -1958,11 +2153,7 @@ func _talk_to(v: Node2D) -> void:
 		Game.friends[id] = lv + 10
 		Game.state_changed.emit()
 		line += "　（好感 +10）"
-	_dialog_villager = v
-	_dialog_name.text = "%s · 好感 %d" % [v.display_name, Game.friends[id]]
-	_dialog_text.text = line
-	_toggle_dialog(true)
-	Sfx.play("talk")
+	return line
 
 
 # ---------- 订单任务板 ----------
@@ -2075,6 +2266,9 @@ func _make_order(kind: String, id: String) -> Dictionary:
 
 
 func _deliver_order(i: int) -> void:
+	if Net.is_guest():
+		Net.send({t = "intent", k = "order", d = {"i": i}})
+		return
 	var o: Dictionary = _orders[i]
 	if o.done:
 		return
@@ -2135,6 +2329,9 @@ func _sync_chickens() -> void:
 
 
 func _buy_chicken() -> void:
+	if Net.is_guest():
+		Net.send({t = "intent", k = "buy", d = {"id": "chicken"}})
+		return
 	if Game.chicken_count >= Game.MAX_CHICKENS:
 		_toast("鸡舍住满啦（最多 %d 只）" % Game.MAX_CHICKENS)
 		return
@@ -2152,6 +2349,9 @@ func _buy_chicken() -> void:
 # ---------- 牛羊牧场 ----------
 
 func _buy_livestock(kind: String) -> void:
+	if Net.is_guest():
+		Net.send({t = "intent", k = "buy", d = {"id": kind}})
+		return
 	var is_cow := kind == "cow"
 	var count: int = Game.cow_count if is_cow else Game.sheep_count
 	var cap: int = Game.MAX_COWS if is_cow else Game.MAX_SHEEP
@@ -2248,6 +2448,9 @@ func _collect_barn() -> void:
 
 
 func _upgrade_rod() -> void:
+	if Net.is_guest():
+		Net.send({t = "intent", k = "buy", d = {"id": "rod"}})
+		return
 	if Game.rod_lv >= 2:
 		return
 	if Game.gold < Game.ROD_UP_COST:
@@ -2751,6 +2954,10 @@ func _update_hint() -> void:
 
 ## 世界坐标飘字（+N 动作反馈）：上浮并淡出
 func _float_text(txt: String, world_pos: Vector2, col: Color) -> void:
+	# 联机：host 替 guest 执行动作时，把飘字同步给对方
+	if Net.is_host() and _remote_exec:
+		Net.send({t = "evt", ek = "float", txt = txt,
+				p = [world_pos.x, world_pos.y], col = [col.r, col.g, col.b]})
 	var holder := Node2D.new()
 	holder.position = world_pos
 	holder.z_index = 60
@@ -2793,6 +3000,9 @@ func _fish_hint(f: Dictionary) -> String:
 
 
 func _toast(msg: String) -> void:
+	# 联机：host 替 guest 执行动作或睡觉结算时，把提示同步给对方
+	if Net.is_host() and (_remote_exec or sleeping):
+		Net.send({t = "evt", ek = "toast", msg = msg})
 	toast_label.text = msg
 	if _toast_tween and _toast_tween.is_valid():
 		_toast_tween.kill()
@@ -2819,3 +3029,415 @@ func _mk_btn(txt: String) -> Button:
 	b.add_theme_font_override("font", _ui_font)
 	b.add_theme_font_size_override("font_size", 14)
 	return b
+
+
+# ---------- 联机：同步与意图 ----------
+
+## 每帧联机计时：全量防抖 / host 周期全量 / 10Hz 快照与位置播报
+func _net_tick(delta: float) -> void:
+	if not Net.is_online():
+		return
+	if _full_t > 0.0:
+		_full_t -= delta
+		if _full_t <= 0.0:
+			_net_full_now()
+	if Net.is_host():
+		_pf_t += delta
+		if _pf_t >= 1.0:
+			_pf_t = 0.0
+			_net_full_now()
+	_snap_t += delta
+	if _snap_t < 0.1:
+		return
+	_snap_t = 0.0
+	if Net.is_host():
+		var ents := {}
+		ents.c = _ents_pos(_chickens)
+		ents.v = _ents_pos(_villagers)
+		ents.p = _ents_pos(_pets)
+		ents.w = _ents_pos(_cows)
+		ents.s = _ents_pos(_sheeps)
+		Net.send({t = "snap", p = [player.position.x, player.position.y,
+				player._row(), int(player.sprite.flip_h)],
+				time = time_min, w = weather, e = ents})
+	elif Net.is_guest():
+		Net.send({t = "pos", p = [player.position.x, player.position.y,
+				player._row(), int(player.sprite.flip_h)]})
+
+
+func _ents_pos(arr: Array) -> Array:
+	var out: Array = []
+	for n in arr:
+		var nd := n as Node2D
+		out.append([nd.position.x, nd.position.y])
+	return out
+
+
+## 立即推送全量状态给 guest（复用存档序列化）
+func _net_full_now() -> void:
+	if not Net.is_host():
+		return
+	_full_t = 0.0
+	_pf_t = 0.0
+	Net.send({t = "full", d = _save_payload()})
+
+
+## 动作结算后小延迟推送全量（防抖合并连续动作）
+func _net_full_soon() -> void:
+	if Net.is_host() and _full_t <= 0.0:
+		_full_t = 0.25
+
+
+## 网络消息路由
+func _on_net_msg(m: Dictionary) -> void:
+	match String(m.get("t", "")):
+		"pos":
+			if Net.is_host():
+				_update_shadow(m.get("p", []))
+		"snap":
+			if Net.is_guest():
+				_apply_snap(m)
+		"full":
+			if Net.is_guest():
+				var nd: Dictionary = m.get("d", {})
+				var was_day := Game.day
+				_apply_payload(nd)
+				if _guest_sleeping and int(nd.get("day", was_day)) > was_day:
+					# host 天亮结算完成（按天数前进判定，忽略睡前防抖全量）：
+					# 黑屏淡出，恢复行走
+					_guest_sleeping = false
+					var tw := create_tween()
+					tw.tween_property(fade, "color:a", 0.0, 0.7)
+					tw.tween_callback(func() -> void:
+						player.set_physics_process(true)
+						sleeping = false)
+		"intent":
+			if Net.is_host():
+				_apply_intent(String(m.get("k", "")), m.get("d", {}))
+		"hello":
+			if Net.is_host():
+				_net_full_now()
+		"evt":
+			_apply_evt(m)
+
+
+## guest：应用 host 的 10Hz 轻量快照
+func _apply_snap(m: Dictionary) -> void:
+	_update_shadow(m.get("p", []))
+	time_min = float(m.get("time", time_min))
+	var w := String(m.get("w", weather))
+	if w != weather:
+		weather = w
+		_rain_node.visible = weather == "rain"
+	var e: Dictionary = m.get("e", {})
+	_apply_ents(e.get("c"), _chickens)
+	_apply_ents(e.get("v"), _villagers)
+	_apply_ents(e.get("p"), _pets)
+	_apply_ents(e.get("w"), _cows)
+	_apply_ents(e.get("s"), _sheeps)
+
+
+func _apply_ents(arr, nodes: Array) -> void:
+	if arr == null:
+		return
+	for i in mini(arr.size(), nodes.size()):
+		(nodes[i] as Node2D).position = Vector2(float(arr[i][0]), float(arr[i][1]))
+
+
+func _update_shadow(p: Array) -> void:
+	if _shadow == null or p.is_empty():
+		return
+	_shadow.position = Vector2(float(p[0]), float(p[1]))
+	var spr: Sprite2D = _shadow.get_node("Spr")
+	spr.frame_coords = Vector2i(0, int(p[2]))
+	spr.flip_h = bool(p[3])
+
+
+## 创建对方玩家影子精灵（复制主角精灵表）
+func _make_shadow() -> void:
+	if _shadow != null:
+		return
+	_shadow = Node2D.new()
+	_shadow.z_index = player.z_index
+	var spr := Sprite2D.new()
+	spr.name = "Spr"
+	spr.texture = player.sprite.texture
+	spr.hframes = player.sprite.hframes
+	spr.vframes = player.sprite.vframes
+	spr.position = player.sprite.position
+	spr.scale = player.sprite.scale
+	spr.offset = player.sprite.offset
+	_shadow.add_child(spr)
+	var lb := _mk_label("好友", 12)
+	lb.size = Vector2(60, 14)
+	lb.position = Vector2(-30, -42)
+	lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_shadow.add_child(lb)
+	add_child(_shadow)
+
+
+## guest：冻结世界实体（位置由主机快照驱动），只保留本地玩家与视觉层
+func _freeze_entities_for_guest() -> void:
+	for arr in [_villagers, _chickens, _cows, _sheeps, _pets]:
+		for n in arr:
+			(n as Node2D).process_mode = Node.PROCESS_MODE_DISABLED
+
+
+## 断线回单人：解冻实体并移除影子
+func _unfreeze_entities() -> void:
+	for arr in [_villagers, _chickens, _cows, _sheeps, _pets]:
+		for n in arr:
+			(n as Node2D).process_mode = Node.PROCESS_MODE_INHERIT
+	if _shadow != null:
+		_shadow.queue_free()
+		_shadow = null
+
+
+## host：执行 guest 的动作意图（换位执行真实逻辑，再回推全量）
+func _apply_intent(k: String, d: Dictionary) -> void:
+	_remote_exec = true
+	match k:
+		"tool":
+			var rp: Vector2 = player.position
+			var rf: Vector2 = player.facing
+			var rt: int = current_tool
+			player.position = Vector2(float(d.pos[0]), float(d.pos[1]))
+			player.facing = Vector2(float(d.fx), float(d.fy))
+			current_tool = int(d.tool)
+			_use_tool()
+			player.position = rp
+			player.facing = rf
+			current_tool = rt
+		"place":
+			_place_at_cell(String(d.mode), Vector2i(int(d.cx), int(d.cy)))
+		"berry":
+			var rp2: Vector2 = player.position
+			player.position = Vector2(float(d.pos[0]), float(d.pos[1]))
+			if gather.pick_berry(player.position) > 0:
+				Game.add_xp("gather", 4)
+			player.position = rp2
+		"eggs":
+			_collect_eggs()
+		"barn":
+			_collect_barn()
+		"pet":
+			for p in _pets:
+				if (p as Node2D).kind == String(d.kind):
+					_pet_pet(p)
+					break
+		"machine":
+			var cell := Vector2i(int(d.cx), int(d.cy))
+			if farm.machines.has(cell):
+				_machine_interact({"cell": cell, "data": farm.machines[cell]})
+		"sleep":
+			_do_sleep(false)
+		"buy":
+			var id := String(d.id)
+			if id == "chicken":
+				_buy_chicken()
+			elif id == "cow" or id == "sheep":
+				_buy_livestock(id)
+			elif id == "hoe" or id == "can":
+				_upgrade(id)
+			elif id == "rod":
+				_upgrade_rod()
+			elif id == "cat" or id == "dog":
+				_adopt_pet(id)
+			else:
+				_buy(id)
+		"sell":
+			_sell(String(d.id), bool(d.all))
+		"sell_item":
+			_sell_item(_cat_of(String(d.id)), String(d.id), bool(d.all))
+		"cook":
+			_cook_dish(String(d.id))
+		"eat":
+			_eat_dish(String(d.id))
+		"gift":
+			_give_gift_to(String(d.who), String(d.id))
+		"chat":
+			var line := _chat_core(String(d.who))
+			Net.send({t = "evt", ek = "dialog", who = String(d.who), line = line})
+		"order":
+			_deliver_order(int(d.i))
+		"fish":
+			# guest 本地打的钓鱼小游戏，主机补扣体力并入账
+			Game.use_stamina(5.0)
+			if String(d.kind) == "chest_g":
+				_apply_chest_gold(int(d.g))
+			elif String(d.kind) == "chest_i":
+				_apply_chest_item(String(d.id), int(d.n))
+			else:
+				_apply_fish(String(d.id))
+	_remote_exec = false
+	_net_full_soon()
+
+
+## 物品所属出售分类（联机 sell_item 意图重建 cat 字典用）
+func _cat_of(id: String) -> Dictionary:
+	if Game.FISH.has(id):
+		return Game.FISH
+	if Game.PRODUCTS.has(id):
+		return Game.PRODUCTS
+	if Game.DISHES.has(id):
+		return Game.DISHES
+	return Game.MATERIALS
+
+
+## guest：应用 host 转发来的表现事件（提示 / 飘字 / 村民对话）
+func _apply_evt(m: Dictionary) -> void:
+	match String(m.get("ek", "")):
+		"toast":
+			_toast(String(m.msg))
+		"float":
+			_float_text(String(m.txt),
+					Vector2(float(m.p[0]), float(m.p[1])),
+					Color(float(m.col[0]), float(m.col[1]), float(m.col[2])))
+		"dialog":
+			var who := String(m.who)
+			for v in _villagers:
+				if _villager_id_of(v) == who:
+					_dialog_villager = v
+					break
+			_dialog_name.text = "%s · 好感 %d" % [
+				_villager_name(who), int(Game.friends.get(who, 0))]
+			_dialog_text.text = String(m.line)
+			_toggle_dialog(true)
+
+
+func _villager_name(id: String) -> String:
+	for cfg in VILLAGERS:
+		if cfg.id == id:
+			return cfg.name
+	return id
+
+
+# ---------- 开局面板：单人 / 建房 / 加入 ----------
+
+func _build_boot() -> void:
+	get_tree().paused = true
+	_boot_panel = PanelContainer.new()
+	_boot_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	_boot_panel.anchor_left = 0.5
+	_boot_panel.anchor_top = 0.5
+	_boot_panel.anchor_right = 0.5
+	_boot_panel.anchor_bottom = 0.5
+	_boot_panel.offset_left = -250.0
+	_boot_panel.offset_top = -160.0
+	_boot_panel.offset_right = 250.0
+	_boot_panel.offset_bottom = 160.0
+	$UI.add_child(_boot_panel)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	_boot_panel.add_child(vb)
+	var pad := Control.new()
+	pad.custom_minimum_size = Vector2(460, 0)
+	vb.add_child(pad)
+	var title := _mk_label("像素农场 · 双人联机", 22)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(title)
+	_boot_status = _mk_label("选择游玩方式", 14)
+	_boot_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_boot_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_boot_status.custom_minimum_size = Vector2(460, 0)
+	vb.add_child(_boot_status)
+	var b_solo := _mk_btn("单人游戏")
+	b_solo.custom_minimum_size = Vector2(0, 40)
+	b_solo.pressed.connect(_boot_solo)
+	vb.add_child(b_solo)
+	var b_host := _mk_btn("建房联机（生成房间码给好友）")
+	b_host.custom_minimum_size = Vector2(0, 40)
+	b_host.pressed.connect(_boot_host)
+	vb.add_child(b_host)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	vb.add_child(row)
+	_boot_input = LineEdit.new()
+	_boot_input.placeholder_text = "好友的房间码"
+	_boot_input.custom_minimum_size = Vector2(230, 40)
+	_boot_input.max_length = 4
+	_boot_input.add_theme_font_override("font", _ui_font)
+	_boot_input.add_theme_font_size_override("font_size", 16)
+	row.add_child(_boot_input)
+	var b_join := _mk_btn("加入好友")
+	b_join.custom_minimum_size = Vector2(150, 40)
+	b_join.pressed.connect(_boot_join)
+	row.add_child(b_join)
+	var tip := _mk_label("联机需先启动 tools/relay 中继服务器；网页版可用 ?ws= 指定地址", 12)
+	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tip.modulate = Color(1, 1, 1, 0.7)
+	vb.add_child(tip)
+	Net.room_created.connect(_on_room_created)
+	Net.joined_room.connect(_on_joined_room)
+
+
+func _boot_solo() -> void:
+	_boot_finish(false)
+
+
+func _boot_host() -> void:
+	_boot_status.text = "正在连接中继服务器……"
+	Net.start_host()
+
+
+func _boot_join() -> void:
+	var code := _boot_input.text.strip_edges().to_upper()
+	if code.length() != 4:
+		_boot_status.text = "房间码是 4 位字符"
+		return
+	_boot_status.text = "正在加入房间 %s ……" % code
+	Net.start_join(code)
+
+
+func _on_room_created(code: String) -> void:
+	_boot_status.text = "房间建好了！房间码：%s\n把房间码发给好友，等 TA 输码点「加入好友」……" % code
+
+
+func _on_joined_room() -> void:
+	_boot_finish(true)
+
+
+func _on_peer_joined() -> void:
+	if _boot_panel != null:
+		_boot_finish(true)
+	else:
+		_toast("好友加入了你们的世界！")
+		_net_full_now()
+
+
+func _on_peer_left() -> void:
+	if Net.is_host():
+		_toast("好友离开了房间，你们继续各自游玩")
+	else:
+		_toast("与主机断开连接，已切换为单人模式")
+		Net.close()
+		_unfreeze_entities()
+
+
+func _on_net_error(msg: String) -> void:
+	if _boot_panel != null:
+		_boot_status.text = msg + "（可先单人游戏）"
+	else:
+		_toast(msg)
+
+
+## 开局面板收尾：恢复游戏；联机侧做影子与实体冻结
+func _boot_finish(as_net: bool) -> void:
+	get_tree().paused = false
+	if _boot_panel != null:
+		_boot_panel.queue_free()
+		_boot_panel = null
+	if Net.room_created.is_connected(_on_room_created):
+		Net.room_created.disconnect(_on_room_created)
+	if Net.joined_room.is_connected(_on_joined_room):
+		Net.joined_room.disconnect(_on_joined_room)
+	if as_net:
+		_make_shadow()
+		if help_open:
+			_toggle_help(false)
+		if Net.is_guest():
+			_freeze_entities_for_guest()
+			Net.send({t = "hello"})
+			_toast("已加入房间 %s！移动是本地的，动作会发给房主结算" % Net.room_code)
+		else:
+			_toast("建房成功（%s），好友已就位！" % Net.room_code)

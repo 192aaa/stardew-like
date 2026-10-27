@@ -21,6 +21,7 @@ Game="*res://scripts/game.gd"
 Sfx="*res://scripts/sfx.gd"
 Save="*res://scripts/save.gd"
 Music="*res://scripts/music.gd"
+Net="*res://scripts/net.gd"
 
 [display]
 

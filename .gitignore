@@ -10,3 +10,6 @@ build/
 Thumbs.db
 
 __pycache__/
+
+# Node
+node_modules/

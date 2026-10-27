@@ -55,6 +55,16 @@ func pick_berry(p: Vector2) -> int:
 	return 0
 
 
+## 联机 guest 视觉摘果：只换贴图不进背包（数量由主机全量同步）
+func pick_berry_visual(p: Vector2) -> bool:
+	for b in _bushes:
+		if not b.picked and (b.pos as Vector2).distance_to(p) < 48.0:
+			b.picked = true
+			b.spr.texture = TEX_BUSH_PLAIN
+			return true
+	return false
+
+
 func _spawn(n: int) -> void:
 	for i in n:
 		if _objs.size() >= MAX_OBJECTS:
