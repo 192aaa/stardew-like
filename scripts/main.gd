@@ -959,9 +959,9 @@ func _update_hint() -> void:
 
 ## 世界坐标飘字（+N 动作反馈）：上浮并淡出
 func _float_text(txt: String, world_pos: Vector2, col: Color) -> void:
-	var wrap := Node2D.new()
-	wrap.position = world_pos
-	wrap.z_index = 60
+	var holder := Node2D.new()
+	holder.position = world_pos
+	holder.z_index = 60
 	var l := Label.new()
 	l.text = txt
 	l.add_theme_font_override("font", _ui_font)
@@ -972,15 +972,15 @@ func _float_text(txt: String, world_pos: Vector2, col: Color) -> void:
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.size = Vector2(140, 20)
 	l.position = Vector2(-70, -30)
-	wrap.add_child(l)
-	add_child(wrap)
-	var tw := wrap.create_tween()
+	holder.add_child(l)
+	add_child(holder)
+	var tw := holder.create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(wrap, "position:y", world_pos.y - 36.0, 0.95) \
+	tw.tween_property(holder, "position:y", world_pos.y - 36.0, 0.95) \
 			.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
-	tw.tween_property(wrap, "modulate:a", 0.0, 0.95) \
+	tw.tween_property(holder, "modulate:a", 0.0, 0.95) \
 			.set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
-	tw.chain().tween_callback(wrap.queue_free)
+	tw.chain().tween_callback(holder.queue_free)
 
 
 func _cell_center(c: Vector2i) -> Vector2:

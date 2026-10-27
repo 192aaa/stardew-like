@@ -15,12 +15,12 @@ func _ready() -> void:
 		_players.append(p)
 
 
-func play(name: String, vol_db := 0.0, jitter := 0.05) -> void:
-	if not _streams.has(name):
+func play(key: String, vol_db := 0.0, jitter := 0.05) -> void:
+	if not _streams.has(key):
 		return
 	var p := _players[_idx]
 	_idx = (_idx + 1) % _players.size()
-	p.stream = _streams[name]
+	p.stream = _streams[key]
 	p.volume_db = vol_db
 	p.pitch_scale = 1.0 + randf_range(-jitter, jitter)
 	p.play()
