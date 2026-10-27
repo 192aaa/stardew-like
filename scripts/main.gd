@@ -211,7 +211,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_switch_tool(Tool.AXE)
 	elif event.is_action_pressed("mute"):
 		var m: bool = Music.toggle_mute()
-		_toast("音乐与音效已%s（M 切换）" % ("静音" if m else "开启"))
+		_toast("背景音乐已%s（M 切换）" % ("开启" if not m else "关闭"))
 	elif event.is_action_pressed("craft"):
 		if help_open:
 			_toggle_help(false)

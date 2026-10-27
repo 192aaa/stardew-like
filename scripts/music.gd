@@ -5,7 +5,7 @@ const DAY_DB := -9.0
 const NIGHT_DB := -9.0
 const RAIN_DB := -13.0
 
-var muted := false
+var muted := true  # BGM 与雨声默认关闭，按 M 开启
 
 var _day: AudioStreamPlayer
 var _night: AudioStreamPlayer
@@ -26,7 +26,8 @@ func update_phase(time_min: float, raining: bool) -> void:
 	var ph := "night" if (time_min >= 1080.0 or time_min < 360.0) else "day"
 	if ph != _phase:
 		_phase = ph
-		_crossfade(_day if ph == "day" else _night, _night if ph == "day" else _day)
+		if not muted:
+			_crossfade(_day if ph == "day" else _night, _night if ph == "day" else _day)
 	if raining != _rain_on:
 		_rain_on = raining
 		_fade(_rain, RAIN_DB if raining and not muted else -60.0, 1.2)
