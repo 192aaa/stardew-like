@@ -7,6 +7,8 @@ signal state_changed
 const CROPS := {
 	"parsnip": {"name": "防风草", "seed_cost": 20, "sell": 40, "days": 3},
 	"potato": {"name": "土豆", "seed_cost": 35, "sell": 90, "days": 5},
+	"straw": {"name": "草莓", "seed_cost": 80, "sell": 130, "days": 6},
+	"pumpkin": {"name": "南瓜", "seed_cost": 100, "sell": 320, "days": 8},
 }
 
 ## 鱼类图鉴：w = 咬钩权重，night = 只在 18 点后出现
@@ -27,6 +29,7 @@ const MATERIALS := {
 const RECIPES := {
 	"scarecrow": {"name": "稻草人", "cost": {"wood": 5}},
 	"sprinkler": {"name": "洒水器", "cost": {"stone": 4, "wood": 2}},
+	"fertilizer": {"name": "速效肥", "cost": {"wood": 2, "stone": 2}},
 }
 
 const HOE_UP_COST := 500
@@ -34,10 +37,13 @@ const CAN_UP_COST := 500
 
 var gold := 500
 var day := 1
-var seeds := {"parsnip": 5, "potato": 0}
-var harvest := {"parsnip": 0, "potato": 0}
+var seeds := {"parsnip": 5, "potato": 0, "straw": 0, "pumpkin": 0}
+var harvest := {"parsnip": 0, "potato": 0, "straw": 0, "pumpkin": 0}
 ## 背包：木材/石料/野莓/鱼
 var items := {"wood": 0, "stone": 0, "berry": 0, "smelt": 0, "perch": 0, "trout": 0}
+
+## 村民好感度（聊天涨，影响对话台词）
+var friends := {"rosa": 0, "ben": 0}
 
 ## 体力与工具等级（2 = 铜，3x3 范围）
 var stamina := 100.0

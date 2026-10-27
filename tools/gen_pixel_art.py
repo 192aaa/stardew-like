@@ -250,12 +250,196 @@ def outline_sheet(img, fw, fh):
     return out
 
 
+# ---------------- 村民精灵表 ----------------
+
+def npc_sheet(pal, down, up, side):
+    """与玩家表同规格：4 列（站/走A/站/走B）x 3 行（下/上/侧），16x22 单元"""
+    frames = []
+    for body, legbox in ((down, (3, 19, 8, 22)), (up, (3, 19, 8, 22)), (side, (3, 18, 13, 22))):
+        base = grid(body, pal)
+        walkA = shift_region(base, legbox, 1)
+        walkB = shift_region(base, (16 - legbox[2], legbox[1], 16 - legbox[0], legbox[3]), 1)
+        frames += [base, walkA, walkB]
+    sheet = Image.new("RGBA", (16 * 4, 22 * 3), (0, 0, 0, 0))
+    for d in range(3):
+        st, wa, wb = frames[d * 3: d * 3 + 3]
+        for c, fr in ((0, st), (1, wa), (3, wb)):
+            sheet.paste(fr, (c * 16, d * 22))
+    return upscale(outline_sheet(sheet, 16, 22))
+
+
+PAL_ROSA = {
+    "o": (44, 36, 30),
+    "h": (158, 62, 58), "H": (120, 44, 44),   # 红棕长发
+    "s": (248, 208, 160), "e": (48, 40, 34), "m": (206, 122, 100),
+    "r": (198, 74, 88), "R": (156, 52, 66),   # 红裙
+    "k": (84, 54, 42),
+}
+ROSA_DOWN = [
+    "................",
+    "....oooooooo....",
+    "...ohhhhhhhho...",
+    "..ohhhhhhhhhho..",
+    "..ohHhhhhhhHho..",
+    "..ohhhhhhhhhho..",
+    "..ohhsssssshho..",
+    "..ohsessssesho..",
+    "..ohssssssssho..",
+    "..ohsssmmsssho..",
+    "..ohhsssssshho..",
+    "...ohhhhhhhho...",
+    "...orrrrrrrro...",
+    "..orrrrrrrrrro..",
+    "..osrrrrrrrrso..",
+    "..orrrrrrrrrro..",
+    "..oRRRRRRRRRRo..",
+    "...orrrrrrrro...",
+    "...oRRRRRRRRo...",
+    "...orrrrrrrro...",
+    "...okkkkkkkko...",
+    "....oooooooo....",
+]
+ROSA_UP = [
+    "................",
+    "....oooooooo....",
+    "...ohhhhhhhho...",
+    "..ohhhhhhhhhho..",
+    "..ohHhhhhhhHho..",
+    "..ohhhhhhhhhho..",
+    "..ohhhhhhhhhho..",
+    "..ohhhhhhhhhho..",
+    "..ohhhhhhhhhho..",
+    "..ohhhhhhhhhho..",
+    "..ohhsssssshho..",
+    "...ohhhhhhhho...",
+    "...orrrrrrrro...",
+    "..orrrrrrrrrro..",
+    "..osrrrrrrrrso..",
+    "..orrrrrrrrrro..",
+    "..oRRRRRRRRRRo..",
+    "...orrrrrrrro...",
+    "...oRRRRRRRRo...",
+    "...orrrrrrrro...",
+    "...okkkkkkkko...",
+    "....oooooooo....",
+]
+ROSA_SIDE = [
+    "................",
+    "....oooooooo....",
+    "...ohhhhhhhho...",
+    "..ohhhhhhhhhho..",
+    "..ohhhhhhhhhho..",
+    "..ohhhhhhhhHho..",
+    "..ohhhhhhsssso..",
+    "..ohhhhhhsesso..",
+    "..ohhhhhhsssso..",
+    "..ohhhhhhssmso..",
+    "...ohhsssssso...",
+    "...ohhhhhhhho...",
+    "...orrrrrrrro...",
+    "..orrrrrrrrrro..",
+    "..osrrrrrrrrso..",
+    "..orrrrrrrrrro..",
+    "..oRRRRRRRRRRo..",
+    "...orrrrrrrro...",
+    "...oRRRRRRRRo...",
+    "...orrrrrrrro...",
+    "...okkkkkkkko...",
+    "....oooooooo....",
+]
+
+PAL_BEN = {
+    "o": (44, 36, 30),
+    "y": (214, 182, 92), "Y": (178, 148, 64),  # 草帽
+    "h": (182, 182, 172), "H": (142, 142, 132),  # 灰发
+    "s": (234, 188, 142), "e": (48, 40, 34), "m": (196, 116, 96),
+    "v": (96, 144, 72), "V": (72, 114, 54),    # 绿马甲
+    "w": (226, 220, 200),
+    "p": (96, 76, 58), "P": (76, 58, 44),
+    "k": (66, 48, 38),
+}
+BEN_DOWN = [
+    "................",
+    "....oooooooo....",
+    "...oyyyyyyyyo...",
+    "..oyyYYYYYYyyo..",
+    "..oyyyyyyyyyyo..",
+    "...ohhhhhhhho...",
+    "..ohssssssshho..",
+    "..ohsessssesho..",
+    "..ohssssssssho..",
+    "..ohsssmmsssho..",
+    "...ohssssssho...",
+    "....ovvvvvvo....",
+    "..owvvvvvvvvwo..",
+    "..owvvvvvvvvwo..",
+    "..osvvvvvvvvso..",
+    "..owwwwwwwwwwo..",
+    "...oppppppppo...",
+    "...oPpppppppo...",
+    "...oppppppppo...",
+    "...oppo..oppo...",
+    "...okko..okko...",
+    "....oooooooo....",
+]
+BEN_UP = [
+    "................",
+    "....oooooooo....",
+    "...oyyyyyyyyo...",
+    "..oyyYYYYYYyyo..",
+    "..oyyyyyyyyyyo..",
+    "...oyyyyyyyyo...",
+    "..ohhhhhhhhhho..",
+    "..ohhhhhhhhhho..",
+    "..ohhhhhhhhhho..",
+    "..ohhhhhhhhhho..",
+    "...ohhhhhhhho...",
+    "....oVVVVVVo....",
+    "..owvvvvvvvvwo..",
+    "..owvvvvvvvvwo..",
+    "..osvvvvvvvvso..",
+    "..owwwwwwwwwwo..",
+    "...oppppppppo...",
+    "...oPpppppppo...",
+    "...oppppppppo...",
+    "...oppo..oppo...",
+    "...okko..okko...",
+    "....oooooooo....",
+]
+BEN_SIDE = [
+    "................",
+    "....oooooooo....",
+    "...oyyyyyyyyo...",
+    "..oyyYYYYYYyyo..",
+    "..oyyyyyyyyyyo..",
+    "..oyhhhhhhhho...",
+    "..ohhssssssho...",
+    "..ohhssesssho...",
+    "..ohhssssssho...",
+    "..ohhssmmssho...",
+    "...ohsssssho....",
+    "....ovvvvvvo....",
+    "...owvvvvvvwo...",
+    "...owvvvvvvwo...",
+    "...osvvvvvvso...",
+    "...owwwwwwwwo...",
+    "...oppppppppo...",
+    "...oPpppppppo...",
+    "...oppppppppo...",
+    "...oppppppppo...",
+    "...okkkkkkkko...",
+    "....oooooooo....",
+]
+
+
 # ---------------- 作物图集 ----------------
 
 PAL_C = {
     "o": (34, 48, 26), "g": (88, 150, 62), "G": (64, 118, 48),
     "y": (168, 190, 86), "w": (238, 226, 168),
     "d": (58, 108, 44), "t": (150, 108, 62), "T": (118, 82, 46),
+    "r": (214, 66, 56), "R": (168, 44, 42), "f": (242, 242, 226),
+    "n": (232, 128, 44), "N": (196, 92, 32),
 }
 
 
@@ -419,10 +603,172 @@ def crop_potato(stage):
     return rows
 
 
+def crop_strawberry(stage):
+    if stage == 0:
+        rows = [
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "......gg........",
+            ".....g..g.g.....",
+            "......gg.g......",
+            ".......og.......",
+            ".......og.......",
+            "......oGg.......",
+            "................",
+            "................",
+        ]
+    elif stage == 1:
+        rows = [
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            ".....gg..gg.....",
+            "....gggg.gggg...",
+            "....gg.gggg.gg..",
+            ".....oogggggo...",
+            "......oggggo....",
+            "......ogGggo....",
+            ".....ogGGggo....",
+            ".....oGGGGg.....",
+            "......oGGg......",
+            "................",
+            "................",
+        ]
+    elif stage == 2:
+        rows = [
+            "................",
+            "................",
+            "....gg...gg.....",
+            "...gggg.gggg....",
+            "..gg.gggggg.gg..",
+            "..og.gggggg.gg..",
+            "...oogffggfgo...",
+            "....ogffgffg....",
+            ".....oggfgo.....",
+            ".....ogggggo....",
+            ".....ogGGggo....",
+            "....ogGGGGgo....",
+            "....oGGGGGg.....",
+            ".....oGGGg......",
+            "................",
+            "................",
+        ]
+    else:
+        rows = [
+            "................",
+            "................",
+            "....gg...gg.....",
+            "...gggg.gggg....",
+            "..gg.gggggg.gg..",
+            "..og.gggggg.gg..",
+            "...oogrroggfo...",
+            "....ogrRorfro...",
+            ".....ogrrgro....",
+            "....ogrrrro.....",
+            "....ogrRrrgo....",
+            ".....ogrrrgo....",
+            ".....oGGGGg.....",
+            "......oGGg......",
+            "................",
+            "................",
+        ]
+    return rows
+
+
+def crop_pumpkin(stage):
+    if stage == 0:
+        rows = [
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            ".......gg.......",
+            "....gg.g.g.gg...",
+            ".....g.ggg.g....",
+            "......ogggo.....",
+            ".......oggo.....",
+            ".......oGgo.....",
+            "................",
+            "................",
+        ]
+    elif stage == 1:
+        rows = [
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "...gg....gg.....",
+            "..gggg..gggg.gg.",
+            "..gg.gggg.gggg..",
+            "...oogggggg.gg..",
+            ".....ogggoog....",
+            "......oggo......",
+            ".....oGgggo.....",
+            "......oGGg......",
+            "................",
+            "................",
+        ]
+    elif stage == 2:
+        rows = [
+            "................",
+            "................",
+            "................",
+            "................",
+            "..gg......gg....",
+            ".gggg....gggg...",
+            ".gg.gggggg.gg...",
+            "..ooggggggg.....",
+            "....oggnngo.....",
+            "...oggnNNnngo...",
+            "...ognNNNNngo...",
+            "...ognNNNNngo...",
+            "....ognNNngo....",
+            ".....oNNNo......",
+            "................",
+            "................",
+        ]
+    else:
+        rows = [
+            "................",
+            "................",
+            "................",
+            "...gg.....gg....",
+            "..gggg...gggg...",
+            ".gg..ggggg..gg..",
+            ".og.gggggggg....",
+            "..oogggnngg.....",
+            "....ognnnnno....",
+            "...ognnNNnnno...",
+            "..ognnNNNNnnno..",
+            "..ognNNooNNnno..",
+            "..ognnNNNNnnno..",
+            "...ognnnnnnno...",
+            "....oNNNNNNo....",
+            "................",
+        ]
+    return rows
+
+
 def crops_atlas():
-    art = Image.new("RGBA", (16 * 8, 16), (0, 0, 0, 0))
+    art = Image.new("RGBA", (16 * 16, 16), (0, 0, 0, 0))
     order = [crop_parsnip(0), crop_parsnip(1), crop_parsnip(2), crop_parsnip(3),
-             crop_potato(0), crop_potato(1), crop_potato(2), crop_potato(3)]
+             crop_potato(0), crop_potato(1), crop_potato(2), crop_potato(3),
+             crop_strawberry(0), crop_strawberry(1), crop_strawberry(2), crop_strawberry(3),
+             crop_pumpkin(0), crop_pumpkin(1), crop_pumpkin(2), crop_pumpkin(3)]
     for i, rows in enumerate(order):
         art.paste(outline(grid(rows, PAL_C), (30, 42, 24, 255)), (i * 16, 0))
     return upscale(art)
@@ -1252,6 +1598,125 @@ def sfx_axe():
     _write_wav("s_axe.wav", [fn(i) for i in range(n)])
 
 
+def sfx_talk():
+    """对话：两个上扬的短促方波音"""
+    out = []
+    for f, d in ((660, 0.055), (990, 0.07)):
+        n = _dur(d)
+        ph = 0.0
+        for i in range(n):
+            ph += f / SR
+            out.append((1.0 if ph % 1.0 < 0.5 else -1.0) * 0.26 * _env(i, n, 0.004, 1.2))
+    _write_wav("s_talk.wav", out)
+
+
+def sfx_rain():
+    """雨声环境音：低通噪声 + 缓慢起伏，可无缝循环"""
+    rng = random.Random(7)
+    n = _dur(4.0)
+    lp = 0.0
+    out = []
+    for i in range(n):
+        w = rng.random() * 2 - 1
+        lp += 0.22 * (w - lp)
+        wob = 0.72 + 0.28 * math.sin(i / float(SR) * math.pi * 1.0)
+        out.append(lp * 1.15 * wob)
+    _write_wav("s_rain.wav", out)
+
+
+# ---------------- 8-bit BGM（方波旋律 + 三角波贝斯 + 噪声踩镲） ----------------
+
+def _note_freq(m):
+    return 440.0 * (2.0 ** ((m - 69) / 12.0))
+
+
+def _wave_sq(ph, duty=0.5):
+    return 1.0 if (ph % 1.0) < duty else -1.0
+
+
+def _wave_tri(ph, _duty=0.5):
+    p = ph % 1.0
+    return 4.0 * p - 1.0 if p < 0.5 else 3.0 - 4.0 * p
+
+
+def _render_track(events, wave, amp, bpm, duty=0.5):
+    """events: [(midi, beats)]，midi=0 为休止；返回采样列表"""
+    total = int(SR * 60.0 / bpm * sum(b for _, b in events))
+    out = [0.0] * total
+    i = 0
+    for midi, beats in events:
+        n = int(SR * 60.0 / bpm * beats)
+        if midi > 0:
+            f = _note_freq(midi)
+            ph = 0.0
+            for k in range(n):
+                ph += f / SR
+                out[i + k] += amp * wave(ph, duty) * _env(k, n, 0.012, 0.8)
+        i += n
+    return out
+
+
+def _hats(total_n, bpm, amp, every=1, seed=11):
+    rng = random.Random(seed)
+    beat_n = int(SR * 60.0 / bpm)
+    out = [0.0] * total_n
+    n = int(SR * 0.045)
+    for b in range(0, total_n // beat_n + 1, every):
+        for k in range(n):
+            if b * beat_n + k < total_n:
+                out[b * beat_n + k] += amp * (rng.random() * 2 - 1) * _env(k, n, 0.001, 2.5)
+    return out
+
+
+def _bgm_write(name, tracks):
+    n = max(len(t) for t in tracks)
+    mixed = [sum(t[i] for t in tracks if i < len(t)) for i in range(n)]
+    peak = max(abs(s) for s in mixed) or 1.0
+    mixed = [s / peak * 0.78 for s in mixed]
+    _write_wav(name, mixed)
+
+
+def bgm_day():
+    """白日主题：132 BPM C 大调，轻快方波旋律"""
+    bpm = 132
+    b1 = [(76, .5), (79, .5), (81, .5), (79, .5), (76, .5), (79, .5), (81, .5), (84, .5)]
+    b2 = [(81, .5), (79, .5), (76, .5), (74, .5), (72, .5), (74, .5), (76, 1)]
+    b3 = [(74, .5), (76, .5), (74, .5), (72, .5), (69, .5), (72, .5), (74, .5), (76, .5)]
+    b4 = [(72, .5), (69, .5), (67, .5), (69, .5), (72, 1), (0, 1)]
+    b5 = [(79, .5), (81, .5), (79, .5), (76, .5), (74, .5), (76, .5), (74, .5), (72, .5)]
+    b6 = [(74, .5), (72, .5), (69, .5), (67, .5), (72, 1), (0, 1)]
+    melody = b1 + b2 + b3 + b4 + b1 + b2 + b5 + b6
+    bass = []
+    for root in (48, 48, 41, 43, 48, 48, 41, 43):
+        bass += [(root, 1), (root + 7, 1), (root, 1), (root + 7, 1)]
+    lead = _render_track(melody, _wave_sq, 0.16, bpm, 0.32)
+    low = _render_track(bass, _wave_tri, 0.22, bpm)
+    beats_n = int(SR * 60.0 / bpm * sum(b for _, b in melody))
+    hats = _hats(beats_n, bpm, 0.06, 1)
+    _bgm_write("bgm_day.wav", [lead, low, hats])
+
+
+def bgm_night():
+    """夜晚主题：84 BPM A 小调，舒缓三角波"""
+    bpm = 84
+    melody = [
+        (69, 1), (72, 1), (76, 2),
+        (74, 1), (72, 1), (69, 2),
+        (67, 1), (69, 1), (72, 2),
+        (64, 2), (0, 2),
+        (69, 1), (72, 1), (76, 2),
+        (79, 1), (76, 1), (72, 2),
+        (74, 1), (76, 1), (74, 1), (72, 1),
+        (69, 2), (0, 2),
+    ]
+    bass = []
+    for root in (45, 45, 41, 43, 45, 41, 43, 45):
+        bass += [(root, 4)]
+    lead = _render_track(melody, _wave_tri, 0.2, bpm)
+    low = _render_track(bass, _wave_tri, 0.14, bpm)
+    _bgm_write("bgm_night.wav", [lead, low])
+
+
 def main():
     save(upscale(tile_grass(1, dots=True)), "grass.png")
     for f in range(4):
@@ -1296,8 +1761,13 @@ def main():
     save(cloud_shadow(), "cloud_shadow.png")
     save(leaf(), "leaf.png")
     save(dust(), "dust.png")
-    for fn in (sfx_hoe, sfx_water, sfx_plant, sfx_harvest, sfx_coin, sfx_bite, sfx_pick, sfx_axe):
+    save(npc_sheet(PAL_ROSA, ROSA_DOWN, ROSA_UP, ROSA_SIDE), "villager_rosa.png")
+    save(npc_sheet(PAL_BEN, BEN_DOWN, BEN_UP, BEN_SIDE), "villager_ben.png")
+    for fn in (sfx_hoe, sfx_water, sfx_plant, sfx_harvest, sfx_coin, sfx_bite, sfx_pick, sfx_axe,
+               sfx_talk, sfx_rain):
         fn()
+    bgm_day()
+    bgm_night()
     print("done ->", OUT)
 
 

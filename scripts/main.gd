@@ -1,16 +1,71 @@
 extends Node2D
-## 主场景逻辑：昼夜循环、六种工具（锄/壶/种子x2/鱼竿/斧镐）、体力系统、
-## 钓鱼时机小游戏、商店（种子/作物/鱼/材料/工具升级）、制作与放置、HUD 提示
+## 主场景逻辑：昼夜循环、天气（晴/雨）、八种工具（锄/壶/种子x4/鱼竿/斧镐）、体力系统、
+## 钓鱼小游戏、村民对话与好感度、商店（种子/作物/鱼/材料/工具升级）、制作与放置、HUD 提示
 
 const DAY_START_MIN := 6 * 60
 const DAY_END_MIN := 24 * 60
 const MINUTES_PER_SECOND := 12.0  # 现实 90 秒 = 游戏 1 天
 
-enum Tool { HOE, CAN, SEED_PARSNIP, SEED_POTATO, ROD, AXE }
+enum Tool { HOE, CAN, SEED_PARSNIP, SEED_POTATO, SEED_STRAW, SEED_PUMP, ROD, AXE }
 
-const TOOL_NAMES := ["锄头", "水壶", "防风草种", "土豆种", "鱼竿", "斧镐"]
+const TOOL_NAMES := ["锄头", "水壶", "防风草种", "土豆种", "草莓种", "南瓜种", "鱼竿", "斧镐"]
+const TOOL_SEED := {
+	Tool.SEED_PARSNIP: "parsnip", Tool.SEED_POTATO: "potato",
+	Tool.SEED_STRAW: "straw", Tool.SEED_PUMP: "pumpkin",
+}
 const TEX_BOBBER := preload("res://assets/bobber.png")
 const TEX_FISH := preload("res://assets/fish.png")
+const RainScript := preload("res://scripts/rain.gd")
+const VillagerScript := preload("res://scripts/villager.gd")
+
+## 村民配置：活动区与出生点（已避开建筑/池塘/栅栏）
+const VILLAGERS := [
+	{"id": "rosa", "name": "罗莎", "tex": "res://assets/villager_rosa.png",
+		"roam": Rect2(-1290, 590, 240, 140), "spawn": Vector2(-1170, 640)},
+	{"id": "ben", "name": "老本", "tex": "res://assets/villager_ben.png",
+		"roam": Rect2(330, -280, 300, 160), "spawn": Vector2(480, -170)},
+]
+
+## 村民台词：好感 <30 陌生 / <70 熟悉 / >=70 好友
+const DIALOGS := {
+	"rosa": {
+		"low": [
+			"花田的花今天开得真好看，你注意到了吗？",
+			"水井边很凉快，我常在那儿发呆。",
+			"听说下雨天鱼儿特别爱咬钩哦。",
+			"新来的农场主？你的地收拾得还不错嘛。",
+		],
+		"mid": [
+			"我们已经是朋友啦，有空来花田找我玩。",
+			"老本的南瓜饼可香了，可惜他不肯给我配方。",
+			"夜里池塘边有萤火虫，非常美的。",
+			"草莓红红的最可爱了，种一点吧？",
+		],
+		"high": [
+			"有你在这个村子，热闹多了。谢谢你！",
+			"这朵花本来想送你的……啊，忘带了，明天一定！",
+			"等你农场大丰收，一定要请我吃草莓！",
+		],
+	},
+	"ben": {
+		"low": [
+			"后生，种子钱要攒好，别乱花。",
+			"我这把老骨头，敲不动石头喽。",
+			"雨天省水壶，晴天别偷懒，记住了？",
+			"货摊上的东西随便看，别客气。",
+		],
+		"mid": [
+			"你小子干活挺麻利，像年轻时候的我。",
+			"南瓜要长很久，耐心点，收获时你就懂了。",
+			"乌鸦最怕稻草人，农田边立一个准没错。",
+		],
+		"high": [
+			"好小子，这村子以后就指望你啦。",
+			"改天教你两手钓鱼的诀窍……先收你点学费，哈哈。",
+			"南瓜熟了给我留一个，我给你做南瓜饼。",
+		],
+	},
+}
 
 @onready var player: CharacterBody2D = $Player
 @onready var farm: Node2D = $Farm
@@ -26,18 +81,29 @@ const TEX_FISH := preload("res://assets/fish.png")
 @onready var _slot_labels: Array = [
 	$UI/Hotbar/Slot1/L, $UI/Hotbar/Slot2/L, $UI/Hotbar/Slot3/L,
 	$UI/Hotbar/Slot4/L, $UI/Hotbar/Slot5/L, $UI/Hotbar/Slot6/L,
+	$UI/Hotbar/Slot7/L, $UI/Hotbar/Slot8/L,
 ]
 @onready var _slot_panels: Array = [
 	$UI/Hotbar/Slot1, $UI/Hotbar/Slot2, $UI/Hotbar/Slot3,
 	$UI/Hotbar/Slot4, $UI/Hotbar/Slot5, $UI/Hotbar/Slot6,
+	$UI/Hotbar/Slot7, $UI/Hotbar/Slot8,
 ]
 
 var current_tool: int = Tool.HOE
 var time_min := float(DAY_START_MIN)
 var sleeping := false
+var weather := "sun"  # "sun" / "rain"
 var shop_open := false
 var craft_open := false
 var place_mode := ""
+var dialog_open := false
+var _dialog_villager: Node2D = null
+var _talked_today := {}
+var _villagers: Array = []
+var _rain_node: Node2D
+var _dialog_panel: PanelContainer
+var _dialog_name: Label
+var _dialog_text: Label
 var _toast_tween: Tween
 var _ui_font: SystemFont
 var _shop_rows := {}
@@ -85,13 +151,25 @@ func _ready() -> void:
 	_bobber.texture = TEX_BOBBER
 	_bobber.visible = false
 	add_child(_bobber)
+	_build_dialog()
+	_rain_node = RainScript.new()
+	_rain_node.z_index = 40
+	_rain_node.visible = false
+	add_child(_rain_node)
+	for cfg in VILLAGERS:
+		var npc = VillagerScript.new()
+		npc.setup(load(cfg.tex), cfg.roam, cfg.name, cfg.spawn)
+		add_child(npc)
+		_villagers.append(npc)
+	weather = "rain" if randf() < 0.3 else "sun"
+	_rain_node.visible = weather == "rain"
 	_refresh_hud()
 	player.position = decor.DOOR_POS + Vector2(0, 44)
 	if _do_load(false):
 		_toast("已读取第 %d 天存档 · F5 存档 / F9 读档 · 按 H 看帮助" % Game.day)
 	else:
 		_toggle_help(true)
-		_toast("欢迎回来！锄地(1) 浇水(2) 种地，5 鱼竿 6 斧镐，C 制作，H 帮助")
+		_toast("欢迎回来！锄地(1) 浇水(2) 种地，7 鱼竿 8 斧镐，C 制作，H 帮助")
 
 
 func _process(delta: float) -> void:
@@ -101,11 +179,16 @@ func _process(delta: float) -> void:
 		if time_min >= DAY_END_MIN:
 			_do_sleep(true)
 	canvas_mod.color = _sky_color(time_min)
-	day_label.text = "第 %d 天  %s" % [Game.day, _clock_text()]
+	if weather == "rain":
+		canvas_mod.color = canvas_mod.color.lerp(Color(0.62, 0.68, 0.8), 0.4)
+	day_label.text = "第 %d 天  %s · %s" % [Game.day, _clock_text(), "雨" if weather == "rain" else "晴"]
 	_update_target()
 	_update_hint()
 	if shop_open and player.position.distance_to(decor.SHOP_POS) > 130.0:
 		_toggle_shop(false)
+	if dialog_open and player.position.distance_to(_dialog_villager.position) > 110.0:
+		_toggle_dialog(false)
+	Music.update_phase(time_min, weather == "rain")
 	_update_fishing(delta)
 
 
@@ -119,9 +202,16 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("tool_4"):
 		_switch_tool(Tool.SEED_POTATO)
 	elif event.is_action_pressed("tool_5"):
-		_switch_tool(Tool.ROD)
+		_switch_tool(Tool.SEED_STRAW)
 	elif event.is_action_pressed("tool_6"):
+		_switch_tool(Tool.SEED_PUMP)
+	elif event.is_action_pressed("tool_7"):
+		_switch_tool(Tool.ROD)
+	elif event.is_action_pressed("tool_8"):
 		_switch_tool(Tool.AXE)
+	elif event.is_action_pressed("mute"):
+		var m: bool = Music.toggle_mute()
+		_toast("音乐与音效已%s（M 切换）" % ("静音" if m else "开启"))
 	elif event.is_action_pressed("craft"):
 		if help_open:
 			_toggle_help(false)
@@ -142,6 +232,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_help(false)
 		elif craft_open:
 			_toggle_craft(false)
+		elif dialog_open:
+			_toggle_dialog(false)
 		elif place_mode != "":
 			_place_at_target()
 		elif shop_open:
@@ -155,6 +247,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_shop(false)
 		elif craft_open:
 			_toggle_craft(false)
+		elif dialog_open:
+			_toggle_dialog(false)
+		elif _near_villager() != null:
+			_talk_to(_near_villager())
 		elif gather.pick_berry(player.position) > 0:
 			player.pop()
 			Sfx.play("pick")
@@ -171,6 +267,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_shop(false)
 		elif craft_open:
 			_toggle_craft(false)
+		elif dialog_open:
+			_toggle_dialog(false)
 		elif place_mode != "":
 			_cancel_place()
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT \
@@ -198,7 +296,9 @@ func _update_target() -> void:
 		farm.set_preview("", Vector2i.ZERO, false)
 	else:
 		farm.set_target(cell, true)
-		farm.set_preview(place_mode, cell, place_mode != "")
+		# 只有稻草人/洒水器有放置预览图，施肥无实体
+		var pm: String = place_mode if (place_mode == "scarecrow" or place_mode == "sprinkler") else ""
+		farm.set_preview(pm, cell, pm != "")
 
 
 func _area_cells(center: Vector2i, level: int) -> Array:
@@ -272,8 +372,8 @@ func _use_tool() -> void:
 					_toast("铜壶浇了 %d 块地" % done)
 			else:
 				_toast(err)
-		Tool.SEED_PARSNIP, Tool.SEED_POTATO:
-			var id := "parsnip" if current_tool == Tool.SEED_PARSNIP else "potato"
+		Tool.SEED_PARSNIP, Tool.SEED_POTATO, Tool.SEED_STRAW, Tool.SEED_PUMP:
+			var id: String = TOOL_SEED[current_tool]
 			if Game.seeds[id] <= 0:
 				_toast("没有%s种子了，去商店买吧" % Game.CROPS[id].name)
 				return
@@ -350,7 +450,8 @@ func _cast() -> void:
 	_bobber.modulate = Color(1, 1, 1)
 	_bobber.visible = true
 	fish_state = 1
-	_bite_t = randf_range(1.6, 4.6)
+	# 雨天鱼更活跃，咬钩更快
+	_bite_t = randf_range(0.9, 2.2) if weather == "rain" else randf_range(1.6, 4.6)
 	player.set_physics_process(false)
 	_toast("甩竿……等鱼上钩（再按空格收回）")
 
@@ -462,6 +563,7 @@ func _save_payload() -> Dictionary:
 		"seeds": Game.seeds, "harvest": Game.harvest, "items": Game.items,
 		"stamina": Game.stamina, "max_stamina": Game.max_stamina,
 		"hoe_level": Game.hoe_level, "can_level": Game.can_level,
+		"friends": Game.friends, "weather": weather,
 		"time_min": time_min, "tool": current_tool,
 		"px": player.position.x, "py": player.position.y,
 		"tiles": tiles, "sprinklers": sprink, "scarecrows": scare,
@@ -487,8 +589,14 @@ func _apply_payload(d: Dictionary) -> void:
 	Game.max_stamina = float(d.get("max_stamina", 100.0))
 	Game.hoe_level = int(d.get("hoe_level", 1))
 	Game.can_level = int(d.get("can_level", 1))
+	var friends_d: Dictionary = d.get("friends", {})
+	for k in Game.friends:
+		if friends_d.has(k):
+			Game.friends[k] = int(friends_d[k])
+	weather = String(d.get("weather", "sun"))
+	_rain_node.visible = weather == "rain"
 	time_min = clampf(float(d.get("time_min", DAY_START_MIN)), DAY_START_MIN, DAY_END_MIN - 1.0)
-	current_tool = clampi(int(d.get("tool", 0)), 0, 5)
+	current_tool = clampi(int(d.get("tool", 0)), 0, 7)
 	player.position = Vector2(
 		float(d.get("px", decor.DOOR_POS.x)),
 		float(d.get("py", decor.DOOR_POS.y + 44.0)))
@@ -561,24 +669,28 @@ func _do_sleep(passed_out: bool) -> void:
 	await tw.finished
 	Game.day += 1
 	time_min = float(DAY_START_MIN)
-	var lost: int = farm.on_new_day()
+	weather = "rain" if randf() < 0.3 else "sun"
+	_rain_node.visible = weather == "rain"
+	var lost: int = farm.on_new_day(weather == "rain")
 	gather.spawn_daily()
 	Game.stamina = Game.max_stamina
 	Game.state_changed.emit()
+	_talked_today.clear()
 	player.position = decor.DOOR_POS + Vector2(0, 46)
 	var save_ok := _autosave()
 	var tail := " · 已自动存档" if save_ok else ""
+	var rtail := " · 今天下雨，农田已浇好" if weather == "rain" else ""
 	var tw2 := create_tween()
 	tw2.tween_property(fade, "color:a", 0.0, 0.7)
 	await tw2.finished
 	player.set_physics_process(true)
 	sleeping = false
 	if lost > 0:
-		_toast("乌鸦夜里偷吃了 %d 株作物！快做个稻草人（C）%s" % [lost, tail])
+		_toast("乌鸦夜里偷吃了 %d 株作物！快做个稻草人（C）%s%s" % [lost, rtail, tail])
 	elif passed_out:
-		_toast("你累倒了……醒来已是第 %d 天%s" % [Game.day, tail])
+		_toast("你累倒了……醒来已是第 %d 天%s%s" % [Game.day, rtail, tail])
 	else:
-		_toast("睡了个好觉！第 %d 天，体力已回满%s" % [Game.day, tail])
+		_toast("睡了个好觉！第 %d 天，体力已回满%s%s" % [Game.day, rtail, tail])
 
 
 func _sky_color(t: float) -> Color:
@@ -754,9 +866,9 @@ func _build_craft() -> void:
 	craft_panel.anchor_right = 0.5
 	craft_panel.anchor_bottom = 0.5
 	craft_panel.offset_left = -250.0
-	craft_panel.offset_top = -170.0
+	craft_panel.offset_top = -185.0
 	craft_panel.offset_right = 250.0
-	craft_panel.offset_bottom = 170.0
+	craft_panel.offset_bottom = 185.0
 	craft_panel.visible = false
 	$UI.add_child(craft_panel)
 	var vb := VBoxContainer.new()
@@ -785,6 +897,7 @@ func _build_craft() -> void:
 		row.add_child(b)
 	vb.add_child(_mk_label("稻草人：守护周围作物，夜里乌鸦不敢来", 13))
 	vb.add_child(_mk_label("洒水器：每天清晨自动浇灌上下左右四格", 13))
+	vb.add_child(_mk_label("速效肥：对已种作物的格子按空格施肥，立刻长一节", 13))
 	vb.add_child(_mk_label("按 C / Esc 关闭", 12))
 
 
@@ -812,14 +925,24 @@ func _place_at_target() -> void:
 		_toast("要在农场范围内放置")
 		return
 	var cell: Vector2i = cell_v
-	var msg: String = farm.place_scarecrow(cell) if place_mode == "scarecrow" \
-			else farm.place_sprinkler(cell)
+	var msg: String
+	if place_mode == "scarecrow":
+		msg = farm.place_scarecrow(cell)
+	elif place_mode == "sprinkler":
+		msg = farm.place_sprinkler(cell)
+	else:
+		msg = farm.try_fertilize(cell)
 	if msg != "":
 		_toast(msg)
 		return
 	Game.consume(Game.RECIPES[place_mode].cost)
 	Sfx.play("plant")
-	_toast("%s放置成功！" % Game.RECIPES[place_mode].name)
+	if place_mode == "fertilizer":
+		var cn: String = farm.tiles[cell].crop
+		_float_text("+1 节 %s" % Game.CROPS[cn].name, _cell_center(cell), Color(0.6, 1, 0.5))
+		_toast("施了速效肥，%s马上长大了一截！" % Game.CROPS[cn].name)
+	else:
+		_toast("%s放置成功！" % Game.RECIPES[place_mode].name)
 	place_mode = ""
 	farm.set_preview("", Vector2i.ZERO, false)
 	player.pop()
@@ -831,6 +954,68 @@ func _cancel_place() -> void:
 	_toast("取消了放置")
 
 
+# ---------- 村民对话 ----------
+
+func _build_dialog() -> void:
+	_dialog_panel = PanelContainer.new()
+	_dialog_panel.anchor_left = 0.5
+	_dialog_panel.anchor_top = 1.0
+	_dialog_panel.anchor_right = 0.5
+	_dialog_panel.anchor_bottom = 1.0
+	_dialog_panel.offset_left = -430.0
+	_dialog_panel.offset_top = -158.0
+	_dialog_panel.offset_right = 430.0
+	_dialog_panel.offset_bottom = -96.0
+	_dialog_panel.visible = false
+	$UI.add_child(_dialog_panel)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 4)
+	_dialog_panel.add_child(vb)
+	_dialog_name = _mk_label("", 16)
+	_dialog_name.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
+	vb.add_child(_dialog_name)
+	_dialog_text = _mk_label("", 14)
+	_dialog_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(_dialog_text)
+	vb.add_child(_mk_label("按 E / Esc 关闭", 12))
+
+
+func _toggle_dialog(open: bool) -> void:
+	dialog_open = open
+	_dialog_panel.visible = open
+	if not open:
+		_dialog_villager = null
+
+
+func _near_villager() -> Node2D:
+	for v in _villagers:
+		if player.position.distance_to(v.position) < 58.0:
+			return v
+	return null
+
+
+func _talk_to(v: Node2D) -> void:
+	var id := ""
+	for cfg in VILLAGERS:
+		if cfg.name == v.display_name:
+			id = cfg.id
+			break
+	var first: bool = not _talked_today.get(id, false)
+	_talked_today[id] = true
+	var lv := int(Game.friends.get(id, 0))
+	var tier := "low" if lv < 30 else ("mid" if lv < 70 else "high")
+	var pool: Array = DIALOGS[id][tier]
+	var line: String = pool[randi() % pool.size()]
+	if first:
+		Game.friends[id] = lv + 10
+		line += "　（好感 +10）"
+	_dialog_villager = v
+	_dialog_name.text = "%s · 好感 %d" % [v.display_name, Game.friends[id]]
+	_dialog_text.text = line
+	_toggle_dialog(true)
+	Sfx.play("talk")
+
+
 # ---------- 玩法说明 ----------
 
 func _build_help() -> void:
@@ -840,9 +1025,9 @@ func _build_help() -> void:
 	help_panel.anchor_right = 0.5
 	help_panel.anchor_bottom = 0.5
 	help_panel.offset_left = -335.0
-	help_panel.offset_top = -218.0
+	help_panel.offset_top = -260.0
 	help_panel.offset_right = 335.0
-	help_panel.offset_bottom = 218.0
+	help_panel.offset_bottom = 260.0
 	help_panel.visible = false
 	$UI.add_child(help_panel)
 	var vb := VBoxContainer.new()
@@ -853,21 +1038,25 @@ func _build_help() -> void:
 	vb.add_child(title)
 	_help_section(vb, "基础操作", [
 		"WASD / 方向键 移动　　空格 / 鼠标左键 使用工具　　E 互动",
-		"1-6 切换工具　　C 制作　　H 帮助　　Esc 关闭　　F5 存档 / F9 读档",
+		"1-8 切换工具　　C 制作　　H 帮助　　Esc 关闭　　F5 存档 / F9 读档　　M 音乐",
 	])
 	_help_section(vb, "种田流程", [
-		"1 锄头开垦 → 3/4 播种 → 2 浇水 → 每天浇水才生长 → 成熟后空格收获",
+		"1 锄头开垦 → 3~6 播种 → 2 浇水 → 每天浇水才生长 → 成熟后空格收获",
 		"对着货摊按 E 开商店：买种子、卖作物和鱼、升级铜锄铜壶（3x3 范围）",
 	])
-	_help_section(vb, "钓鱼（5 鱼竿）", [
+	_help_section(vb, "钓鱼（7 鱼竿）", [
 		"池塘边空格甩竿 → 浮漂变红瞬间再按空格提竿",
 		"按住空格抬起绿条罩住游动的鱼，进度条满即钓获；虹鳟只在 18:00 后咬钩",
 	])
-	_help_section(vb, "采集与制作（6 斧镐 / C 制作）", [
+	_help_section(vb, "采集与制作（8 斧镐 / C 制作）", [
 		"敲石头得石料、敲树枝得木材，每天地图会补充刷新",
 		"北边树林的野莓丛按 E 直接采摘野莓，第二天会重新结果",
-		"稻草人：防乌鸦夜里偷吃作物；洒水器：清晨自动浇灌四邻格",
+		"稻草人防乌鸦；洒水器清晨浇灌四邻格；速效肥让作物立刻长一节",
 		"制作后移动到目标格子按空格放置，Esc 取消",
+	])
+	_help_section(vb, "天气与村民", [
+		"雨天雨水自动浇灌农田、鱼更容易上钩；晴天记得自己浇水",
+		"罗莎在花田、老本在集市散步，靠近按 E 聊天，每天首次聊天涨好感",
 	])
 	_help_section(vb, "体力与昼夜", [
 		"动作消耗体力（左下角），不足则无法干活；家门口按 E 睡觉回满并进入次日，自动存档",
@@ -1006,10 +1195,12 @@ func _refresh_hud() -> void:
 		"2 %s" % ("铜水壶" if Game.can_level >= 2 else "水壶"),
 		"3 防风草种 x%d" % Game.seeds.parsnip,
 		"4 土豆种 x%d" % Game.seeds.potato,
-		"5 鱼竿",
-		"6 斧镐",
+		"5 草莓种 x%d" % Game.seeds.straw,
+		"6 南瓜种 x%d" % Game.seeds.pumpkin,
+		"7 鱼竿",
+		"8 斧镐",
 	]
-	for i in 6:
+	for i in 8:
 		_slot_labels[i].text = ("▶ " + texts[i]) if i == current_tool else texts[i]
 		_slot_panels[i].self_modulate = Color(1, 1, 0.62) if i == current_tool else Color(1, 1, 1, 0.82)
 	# 体力条
@@ -1050,6 +1241,8 @@ func _update_hint() -> void:
 	var txt: String
 	if place_mode != "":
 		txt = "移动到目标格子按空格放置（Esc 取消）"
+	elif _near_villager() != null:
+		txt = "按 E 和 %s 聊聊天吧" % _near_villager().display_name
 	elif player.position.distance_to(decor.SHOP_POS) < 90.0:
 		txt = "按 E 打开商店"
 	elif player.position.distance_to(decor.DOOR_POS) < 80.0:
@@ -1057,9 +1250,9 @@ func _update_hint() -> void:
 	elif gather.near_bush(player.position):
 		txt = "野莓熟了：按 E 采摘，第二天会再结果"
 	elif decor.POND_RECT.grow(30.0).has_point(player.position):
-		txt = "水边适合钓鱼：5 甩竿 · 咬钩后再按空格"
+		txt = "水边适合钓鱼：7 甩竿 · 咬钩后再按空格"
 	else:
-		txt = "1-6 切换工具 · 空格/左键 使用 · C 制作 · E 互动 · H 帮助"
+		txt = "1-8 切换工具 · 空格/左键 使用 · C 制作 · E 互动 · H 帮助"
 	if hint_label.text != txt:
 		hint_label.text = txt
 

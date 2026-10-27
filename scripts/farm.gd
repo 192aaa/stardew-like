@@ -8,6 +8,8 @@ const TEX_CROPS := preload("res://assets/crops.png")
 const TEX_SCARECROW := preload("res://assets/scarecrow.png")
 const TEX_SPRINKLER := preload("res://assets/sprinkler.png")
 const SCARE_RADIUS := 150.0
+## 作物 -> 图集列（每株占 4 列：苗/小/大/成熟）
+const CROP_COL := {"parsnip": 0, "potato": 4, "straw": 8, "pumpkin": 12}
 const ZONES := [
 	Rect2(-420, -320, 240, 170),
 	Rect2(250, -260, 270, 140),
@@ -146,9 +148,23 @@ func is_protected(p: Vector2) -> bool:
 	return false
 
 
-## 新的一天：乌鸦偷食 unprotected 作物 → 浇过水的作物长一节 → 洒水器浇灌 → 湿润重置。
-## 返回被乌鸦吃掉的作物数。
-func on_new_day() -> int:
+## 施肥：对已种作物的地块立刻生长一节；返回 "" 成功，否则错误提示
+func try_fertilize(c: Vector2i) -> String:
+	if not tiles.has(c):
+		return "这里还没有种作物"
+	var t: Dictionary = tiles[c]
+	if t.crop == "":
+		return "这里还没有种作物"
+	if t.stage >= Game.CROPS[t.crop].days:
+		return "%s已经成熟了" % Game.CROPS[t.crop].name
+	t.stage += 1
+	queue_redraw()
+	return ""
+
+
+## 新的一天：乌鸦偷食 unprotected 作物 → 雨天/浇过水的作物长一节 → 洒水器浇灌 → 湿润重置。
+## 雨天清晨所有耕地自动湿润。返回被乌鸦吃掉的作物数。
+func on_new_day(raining := false) -> int:
 	var lost := 0
 	for c in tiles.duplicate():
 		var t: Dictionary = tiles[c]
@@ -158,10 +174,10 @@ func on_new_day() -> int:
 				tiles.erase(c)
 				lost += 1
 				continue
-		if t.crop != "" and t.wtoday and t.stage < Game.CROPS[t.crop].days:
+		if t.crop != "" and (t.wtoday or raining) and t.stage < Game.CROPS[t.crop].days:
 			t.stage += 1
-		t.watered = false
-		t.wtoday = false
+		t.watered = raining
+		t.wtoday = raining
 	for s in sprinklers:  # 洒水器清晨自动浇水
 		for off in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 			var n: Vector2i = s + off
@@ -202,9 +218,9 @@ func _draw() -> void:
 		var r := Rect2(c.x * CELL, c.y * CELL, CELL, CELL)
 		draw_texture_rect(TEX_SOIL_WET if t.watered else TEX_SOIL, r, false)
 		if t.crop != "":
-			# 图集：0-3 列防风草（苗/小/大/成熟），4-7 列土豆
+			# 图集：每株作物占 4 列（苗/小/大/成熟），列偏移见 CROP_COL
 			var idx: int = mini(t.stage, 3)
-			var col := 0 if t.crop == "parsnip" else 4
+			var col: int = CROP_COL[t.crop]
 			draw_texture_rect_region(TEX_CROPS, r, Rect2((col + idx) * CELL, 0, CELL, CELL))
 	for s in sprinklers:
 		draw_texture_rect(TEX_SPRINKLER, Rect2(s.x * CELL, s.y * CELL, CELL, CELL), false)

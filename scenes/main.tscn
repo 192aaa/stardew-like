@@ -135,9 +135,9 @@ anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -340.0
+offset_left = -455.0
 offset_top = -86.0
-offset_right = 340.0
+offset_right = 455.0
 offset_bottom = -18.0
 theme_override_constants/separation = 10
 alignment = 1
@@ -195,7 +195,7 @@ theme_override_colors/font_color = Color(1, 1, 1, 1)
 theme_override_font_sizes/font_size = 14
 horizontal_alignment = 1
 vertical_alignment = 1
-text = "5 鱼竿"
+text = "5 草莓种 x0"
 
 [node name="Slot6" type="PanelContainer" parent="UI/Hotbar"]
 custom_minimum_size = Vector2(105, 54)
@@ -206,7 +206,29 @@ theme_override_colors/font_color = Color(1, 1, 1, 1)
 theme_override_font_sizes/font_size = 14
 horizontal_alignment = 1
 vertical_alignment = 1
-text = "6 斧镐"
+text = "6 南瓜种 x0"
+
+[node name="Slot7" type="PanelContainer" parent="UI/Hotbar"]
+custom_minimum_size = Vector2(105, 54)
+
+[node name="L" type="Label" parent="UI/Hotbar/Slot7"]
+theme_override_fonts/font = SubResource("font_cjk")
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 1
+vertical_alignment = 1
+text = "7 鱼竿"
+
+[node name="Slot8" type="PanelContainer" parent="UI/Hotbar"]
+custom_minimum_size = Vector2(105, 54)
+
+[node name="L" type="Label" parent="UI/Hotbar/Slot8"]
+theme_override_fonts/font = SubResource("font_cjk")
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 1
+vertical_alignment = 1
+text = "8 斧镐"
 
 [node name="ShopPanel" type="PanelContainer" parent="UI"]
 visible = false
