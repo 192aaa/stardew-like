@@ -20,6 +20,7 @@ const FISH := {
 const MATERIALS := {
 	"wood": {"name": "木材", "sell": 8},
 	"stone": {"name": "石料", "sell": 12},
+	"berry": {"name": "野莓", "sell": 25},
 }
 
 ## 制作配方
@@ -35,8 +36,8 @@ var gold := 500
 var day := 1
 var seeds := {"parsnip": 5, "potato": 0}
 var harvest := {"parsnip": 0, "potato": 0}
-## 背包：木材/石料/鱼
-var items := {"wood": 0, "stone": 0, "smelt": 0, "perch": 0, "trout": 0}
+## 背包：木材/石料/野莓/鱼
+var items := {"wood": 0, "stone": 0, "berry": 0, "smelt": 0, "perch": 0, "trout": 0}
 
 ## 体力与工具等级（2 = 铜，3x3 范围）
 var stamina := 100.0

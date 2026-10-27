@@ -20,6 +20,11 @@ const TEX_LAMP := preload("res://assets/lamp.png")
 const TEX_GLOW := preload("res://assets/glow.png")
 const TEX_GLOW_S := preload("res://assets/glow_small.png")
 const TEX_POND_EDGE := preload("res://assets/pond_edge.png")
+const TEX_WELL := preload("res://assets/well.png")
+const TEX_MAILBOX := preload("res://assets/mailbox.png")
+const TEX_LOG := preload("res://assets/log.png")
+const TEX_STUMP := preload("res://assets/stump.png")
+const TEX_MUSHROOM := preload("res://assets/mushroom.png")
 
 const WATER_FRAMES := [
 	preload("res://assets/water0.png"), preload("res://assets/water1.png"),
@@ -32,6 +37,21 @@ const STALL_RECT := Rect2(560, -450, 220, 120)
 const SHOP_POS := Vector2(670, -330)
 const POND_RECT := Rect2(560, -60, 240, 160)
 const LAMP_POS := Vector2(524, -374)
+## 扩展区兴趣点：水井 / 信箱 / 花田 / 原木树桩
+const WELL_POS := Vector2(-1300, -320)
+const MAILBOX_POS := Vector2(-590, -396)
+const GARDEN_RECT := Rect2(-1320, 560, 300, 200)
+const LOG_POS := Vector2(-1210, -470)
+const STUMP_POS := Vector2(-1420, -180)
+## 北部野莓丛（Gather 系统负责交互）
+const BUSH_SPOTS := [
+	Vector2(-560, -880), Vector2(-430, -945), Vector2(-295, -865),
+	Vector2(-150, -950), Vector2(-680, -985), Vector2(-30, -830),
+]
+const MUSHROOM_POS := [
+	Vector2(-1090, 320), Vector2(-1180, 760), Vector2(1120, 480),
+	Vector2(1560, -820), Vector2(-1560, -620), Vector2(1340, 900),
+]
 
 const TREES := [
 	Vector2(-1050, -780), Vector2(-900, -350), Vector2(-1000, 400),
@@ -39,6 +59,20 @@ const TREES := [
 	Vector2(1050, -750), Vector2(1150, -50), Vector2(900, 350),
 	Vector2(300, 600), Vector2(-1000, 850), Vector2(1200, 800),
 	Vector2(480, -520), Vector2(880, -520),
+	# 扩展区内部树木（北 / 南 / 西 / 东）
+	Vector2(-800, -1120), Vector2(-1250, -1140), Vector2(320, -1150),
+	Vector2(920, -1120), Vector2(-1050, -1080), Vector2(-600, 1120),
+	Vector2(120, 1140), Vector2(820, 1120), Vector2(1420, 1090),
+	Vector2(-1700, 60), Vector2(-1660, 720), Vector2(-1720, -660),
+	Vector2(1700, -240), Vector2(1680, 420),
+]
+
+## 石板小路：门口 → 农田 / 商店 / 水井 / 池塘
+const PATHS := [
+	[Vector2(-660, -395), Vector2(-390, -230)],
+	[Vector2(-636, -388), Vector2(-160, -362), Vector2(420, -348), Vector2(636, -322)],
+	[Vector2(-684, -402), Vector2(-1000, -386), Vector2(-1252, -348)],
+	[Vector2(-390, -230), Vector2(-80, -150), Vector2(300, -90), Vector2(498, -20)],
 ]
 
 const FLOWER_POS := [
@@ -56,7 +90,7 @@ const FIREFLY_BASE := [
 	Vector2(860, 40), Vector2(620, 140), Vector2(770, 120), Vector2(470, -30),
 ]
 
-var sign_font: SystemFont
+var sign_font: Font
 var _stones: Array[Vector2] = []
 var _wt := 0.0
 var _glow_window: Sprite2D
@@ -65,15 +99,18 @@ var _fireflies: Array[Sprite2D] = []
 
 
 func _ready() -> void:
-	sign_font = SystemFont.new()
-	sign_font.font_names = PackedStringArray(["Microsoft YaHei", "SimHei", "SimSun"])
+	sign_font = ThemeDB.fallback_font
 	# 小路的石板（固定随机种子，保证每次一致）
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7
-	for i in 12:
-		var t := i / 11.0
-		_stones.append(Vector2(-660, -395).lerp(Vector2(-390, -230), t)
-				+ Vector2(rng.randf_range(-7, 7), rng.randf_range(-6, 6)))
+	for path in PATHS:
+		for i in path.size() - 1:
+			var a: Vector2 = path[i]
+			var b: Vector2 = path[i + 1]
+			var n := maxi(int(a.distance_to(b) / 34.0), 1)
+			for k in n:
+				_stones.append(a.lerp(b, (k + 0.5) / n)
+						+ Vector2(rng.randf_range(-7, 7), rng.randf_range(-6, 6)))
 	# 树木与投影（橡树 / 松树交替）
 	for i in TREES.size():
 		var p: Vector2 = TREES[i]
@@ -86,7 +123,24 @@ func _ready() -> void:
 	for p in LILY_POS:
 		_add_sprite(TEX_LILY, p)
 	_add_sprite(TEX_POND_EDGE, POND_RECT.get_center())
-	# 草丛与石子散布（避开农田/池塘/建筑）
+	# 扩展区：水井 / 信箱 / 原木树桩 / 蘑菇 / 花田花丛
+	_add_sprite(TEX_SHADOW, WELL_POS + Vector2(0, 20))
+	_add_sprite(TEX_WELL, WELL_POS)
+	_add_sprite(TEX_MAILBOX, MAILBOX_POS)
+	_add_sprite(TEX_LOG, LOG_POS)
+	_add_sprite(TEX_STUMP, STUMP_POS)
+	for p in MUSHROOM_POS:
+		_add_sprite(TEX_MUSHROOM, p)
+	for p in BUSH_SPOTS:
+		_add_sprite(TEX_SHADOW, p + Vector2(0, 9))
+	var rng2 := RandomNumberGenerator.new()
+	rng2.seed = 5
+	for i in 14:
+		var fp := Vector2(
+			rng2.randf_range(GARDEN_RECT.position.x + 24, GARDEN_RECT.end.x - 24),
+			rng2.randf_range(GARDEN_RECT.position.y + 24, GARDEN_RECT.end.y - 24))
+		_add_sprite(TEX_FLOWERS, fp, Rect2((i % 4) * 16, 0, 16, 16))
+	# 草丛与石子散布（避开农田/池塘/建筑/新区兴趣点）
 	_scatter_detail()
 	# 夜景：路灯、窗户灯光、萤火虫、炊烟
 	_add_sprite(TEX_LAMP, LAMP_POS)
@@ -98,17 +152,24 @@ func _ready() -> void:
 		f.modulate.a = 0.0
 		_fireflies.append(f)
 	_setup_smoke()
-	# 碰撞：房屋、商店、池塘、灯柱、树干、地图边界
+	# 碰撞：房屋、商店、池塘、灯柱、树干、水井、信箱、花田栅栏、地图边界
 	_add_blocker_rect(HOUSE_RECT)
 	_add_blocker_rect(STALL_RECT)
 	_add_blocker_rect(POND_RECT)
 	_add_blocker_circle(LAMP_POS, 6.0)
 	for p in TREES:
 		_add_blocker_circle(p + Vector2(0, 16), 12.0)
-	_add_blocker_rect(Rect2(-1560, -1060, 3120, 60))
-	_add_blocker_rect(Rect2(-1560, 1000, 3120, 60))
-	_add_blocker_rect(Rect2(-1560, -1000, 60, 2060))
-	_add_blocker_rect(Rect2(1500, -1000, 60, 2060))
+	_add_blocker_circle(WELL_POS, 18.0)
+	_add_blocker_circle(MAILBOX_POS, 5.0)
+	_add_blocker_rect(Rect2(GARDEN_RECT.position.x, GARDEN_RECT.position.y + 2, GARDEN_RECT.size.x, 6))
+	_add_blocker_rect(Rect2(GARDEN_RECT.position.x, GARDEN_RECT.end.y - 8, GARDEN_RECT.size.x, 6))
+	_add_blocker_rect(Rect2(GARDEN_RECT.position.x, GARDEN_RECT.position.y, 6, GARDEN_RECT.size.y))
+	_add_blocker_rect(Rect2(GARDEN_RECT.end.x - 6, GARDEN_RECT.position.y, 6, GARDEN_RECT.size.y))
+	# 地图边界（草地 3800x2600，树墙内侧留出通行缓冲）
+	_add_blocker_rect(Rect2(-1960, -1300, 3920, 72))
+	_add_blocker_rect(Rect2(-1960, 1228, 3920, 72))
+	_add_blocker_rect(Rect2(-1900, -1300, 72, 2600))
+	_add_blocker_rect(Rect2(1828, -1300, 72, 2600))
 
 
 func _process(delta: float) -> void:
@@ -133,8 +194,8 @@ func _scatter_detail() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 99
 	var placed := 0
-	while placed < 30:
-		var p := Vector2(rng.randf_range(-1400, 1400), rng.randf_range(-900, 900))
+	while placed < 46:
+		var p := Vector2(rng.randf_range(-1780, 1780), rng.randf_range(-1180, 1180))
 		var blocked := false
 		for z in FARM.ZONES:
 			if z.grow(8).has_point(p):
@@ -142,6 +203,19 @@ func _scatter_detail() -> void:
 		if POND_RECT.grow(26).has_point(p) or HOUSE_RECT.grow(20).has_point(p) \
 				or STALL_RECT.grow(30).has_point(p) or p.distance_to(DOOR_POS) < 60:
 			blocked = true
+		if GARDEN_RECT.grow(26).has_point(p) or p.distance_to(WELL_POS) < 70 \
+				or p.distance_to(MAILBOX_POS) < 40 or p.distance_to(LOG_POS) < 44 \
+				or p.distance_to(STUMP_POS) < 40:
+			blocked = true
+		for b in BUSH_SPOTS:
+			if p.distance_to(b) < 56:
+				blocked = true
+		for t in TREES:
+			if p.distance_to(t) < 64:
+				blocked = true
+		for s in _stones:
+			if s.distance_to(p) < 26:
+				blocked = true
 		if not blocked:
 			var tex := TEX_TUFT if rng.randf() < 0.72 else TEX_STONE
 			_add_sprite(tex, p)
@@ -217,8 +291,10 @@ func _add_blocker_circle(pos: Vector2, radius: float) -> void:
 
 
 func _draw() -> void:
+	_draw_forest_wall()
 	for z in FARM.ZONES:
 		_draw_fence(z)
+	_draw_fence(GARDEN_RECT)
 	_draw_path()
 	draw_texture_rect(TEX_HOUSE, Rect2(-784, -594, 248, 184), false)
 	draw_texture_rect(TEX_STALL, Rect2(STALL_RECT.position, STALL_RECT.size), false)
@@ -249,3 +325,22 @@ func _draw_fence(r: Rect2) -> void:
 func _draw_path() -> void:
 	for s in _stones:
 		draw_texture_rect(TEX_STONE, Rect2(s.x - 8, s.y - 5, 16, 10), false)
+
+
+## 地图四周的森林树墙（纯绘制，实际阻挡靠边界碰撞矩形）
+func _draw_forest_wall() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
+	var i := 0
+	for x in range(-1876, 1877, 52):
+		_wall_tree(Vector2(x + rng.randf_range(-9, 9), -1248 + rng.randf_range(-7, 7)), i)
+		_wall_tree(Vector2(x + rng.randf_range(-9, 9), 1248 + rng.randf_range(-7, 7)), i + 1)
+		i += 2
+	for y in range(-1244, 1245, 52):
+		_wall_tree(Vector2(-1852 + rng.randf_range(-7, 7), y + rng.randf_range(-9, 9)), i)
+		_wall_tree(Vector2(1852 + rng.randf_range(-7, 7), y + rng.randf_range(-9, 9)), i + 1)
+		i += 2
+
+
+func _wall_tree(p: Vector2, i: int) -> void:
+	draw_texture_rect(TEX_PINE if i % 2 == 1 else TEX_TREE, Rect2(p.x - 32, p.y - 48, 64, 96), false)

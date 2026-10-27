@@ -146,6 +146,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_shop(false)
 		elif craft_open:
 			_toggle_craft(false)
+		elif gather.pick_berry(player.position) > 0:
+			player.pop()
+			_toast("摘到了野莓！已放进背包，明天会再结果")
 		elif player.position.distance_to(decor.SHOP_POS) < 90.0:
 			_toggle_shop(true)
 		elif player.position.distance_to(decor.DOOR_POS) < 80.0 and not sleeping:
@@ -736,6 +739,7 @@ func _build_help() -> void:
 	])
 	_help_section(vb, "采集与制作（6 斧镐 / C 制作）", [
 		"敲石头得石料、敲树枝得木材，每天地图会补充刷新",
+		"北边树林的野莓丛按 E 直接采摘野莓，第二天会重新结果",
 		"稻草人：防乌鸦夜里偷吃作物；洒水器：清晨自动浇灌四邻格",
 		"制作后移动到目标格子按空格放置，Esc 取消",
 	])
@@ -924,6 +928,8 @@ func _update_hint() -> void:
 		txt = "按 E 打开商店"
 	elif player.position.distance_to(decor.DOOR_POS) < 80.0:
 		txt = "按 E 睡觉，回满体力进入下一天"
+	elif gather.near_bush(player.position):
+		txt = "野莓熟了：按 E 采摘，第二天会再结果"
 	elif decor.POND_RECT.grow(30.0).has_point(player.position):
 		txt = "水边适合钓鱼：5 甩竿 · 咬钩后再按空格"
 	else:

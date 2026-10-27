@@ -8,3 +8,5 @@ build/
 # System
 *.tmp
 Thumbs.db
+
+__pycache__/

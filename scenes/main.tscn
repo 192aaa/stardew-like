@@ -21,10 +21,10 @@ script = ExtResource("2")
 
 [node name="Ground" type="Sprite2D" parent="."]
 texture_repeat = 2
-position = Vector2(-1500, -1000)
+position = Vector2(-1900, -1300)
 texture = ExtResource("5")
 region_enabled = true
-region_rect = Rect2(0, 0, 3000, 2000)
+region_rect = Rect2(0, 0, 3800, 2600)
 
 [node name="Patch1" type="Sprite2D" parent="."]
 position = Vector2(-420, -320)

@@ -906,6 +906,122 @@ def bobber():
     return upscale(img)
 
 
+def well():
+    """村庄水井：木架坡顶 + 石圈 + 井口"""
+    img = grid([
+        "....oooooooooooooooo....",
+        "...oHHHHHHHHHHHHHHHHo...",
+        "..oHHHHhHHHHHHhHHHHHHo..",
+        ".oHHHHHHHHHHHHHHHHHHHHo.",
+        ".oRHHHHHHHHHHHHHHHHHHRo.",
+        "..oooooooooooooooooooo..",
+        "...op..............po...",
+        "...op..............po...",
+        "...op..............po...",
+        "...op..............po...",
+        "...op..............po...",
+        "...op..............po...",
+        "..ossssssssssssssssso...",
+        ".osLLsssssssssssssssso..",
+        ".osLLsssssssssssssssso..",
+        ".osssssssssshhhhssssso..",
+        ".ossssssssshhhhhhsssso..",
+        ".ossssssssshhhhhhsssso..",
+        "..osssssssssshhsssssso..",
+        "..oooooooooooooooooooo..",
+    ], {
+        "o": (54, 40, 30), "H": (150, 96, 60), "h": (176, 120, 74), "R": (122, 74, 46),
+        "p": (110, 76, 46), "s": (150, 146, 138), "L": (186, 182, 172),
+    })
+    return upscale(outline(img, (44, 34, 26, 255)))
+
+
+def mailbox():
+    """红色小信箱"""
+    img = grid([
+        "..........",
+        ".oooooooo.",
+        "oRRRRRRRRo",
+        "oRrrrrrrRo",
+        "oRRRRRRRRo",
+        "oRRRRRyRRo",
+        "oooooooooo",
+        "...oppo...",
+        "...oppo...",
+        "...oppo...",
+        "..oppppo..",
+        "..oooooo..",
+    ], {"o": (54, 40, 30), "R": (196, 84, 66), "r": (224, 128, 104),
+        "y": (240, 210, 110), "p": (110, 76, 46)})
+    return upscale(outline(img, (46, 34, 26, 255)))
+
+
+def bush(berry):
+    """野莓丛：满枝红莓 / 采摘后"""
+    img = grid([
+        "....................",
+        "......gggg.ggg......",
+        "....gggGGgggGGgg....",
+        "...gGggggggggggGg...",
+        "..gggggggggggggggg..",
+        "..gGgggggggggggGgg..",
+        "..gggggggggggggggg..",
+        "...ggGgggggggGggg...",
+        "....gggggggggggg....",
+        "......gggggggg......",
+    ], {"g": (74, 132, 58), "G": (58, 108, 46)})
+    if berry:
+        px = img.load()
+        for x, y in ((6, 4), (12, 3), (9, 7), (15, 6), (4, 6)):
+            px[x, y] = (226, 66, 58, 255)
+            px[x + 1, y] = (240, 120, 104, 255)
+    return upscale(outline(img, (40, 78, 34, 255)))
+
+
+def log():
+    """倒下的原木"""
+    img = grid([
+        "....................",
+        "...oooooooooooooo...",
+        "..ollbbbbbbbbbbbbo..",
+        ".oLlllbbbbbbbbbbbbo.",
+        ".oLllbbbbbbbbbbbbbo.",
+        "..oooooooooooooooo..",
+        "....................",
+    ], {"o": (56, 40, 28), "b": (128, 92, 56), "B": (100, 70, 42),
+        "l": (150, 112, 70), "L": (176, 138, 90)})
+    return upscale(outline(img, (50, 36, 24, 255)))
+
+
+def stump():
+    """砍剩的树桩"""
+    img = grid([
+        "..oooooo..",
+        ".oLLLLLLo.",
+        ".oLrLLrLo.",
+        ".oLLLLLLo.",
+        ".otttttto.",
+        ".otttttto.",
+        "..oooooo..",
+    ], {"o": (56, 40, 28), "L": (176, 138, 90), "r": (146, 108, 68), "t": (110, 78, 46)})
+    return upscale(outline(img, (50, 36, 24, 255)))
+
+
+def mushroom():
+    """红帽白点小蘑菇"""
+    img = grid([
+        "..oooo..",
+        ".orrrro.",
+        "orrwrrro",
+        "orrwrrro",
+        ".owwwwo.",
+        "..owwo..",
+        "..owwo..",
+        "..oooo..",
+    ], {"o": (60, 40, 34), "r": (208, 74, 58), "w": (240, 234, 220)})
+    return upscale(outline(img, (48, 32, 28, 255)))
+
+
 def main():
     save(upscale(tile_grass(1, dots=True)), "grass.png")
     for f in range(4):
@@ -939,6 +1055,13 @@ def main():
     save(sprinkler(), "sprinkler.png")
     save(fish_icon(), "fish.png")
     save(bobber(), "bobber.png")
+    save(well(), "well.png")
+    save(mailbox(), "mailbox.png")
+    save(bush(True), "bush_berry.png")
+    save(bush(False), "bush_plain.png")
+    save(log(), "log.png")
+    save(stump(), "stump.png")
+    save(mushroom(), "mushroom.png")
     print("done ->", OUT)
 
 
