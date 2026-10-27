@@ -21,30 +21,30 @@ script = ExtResource("2")
 
 [node name="Ground" type="Sprite2D" parent="."]
 texture_repeat = 2
-position = Vector2(-1900, -1300)
+position = Vector2(0, 0)
 texture = ExtResource("5")
 region_enabled = true
 region_rect = Rect2(0, 0, 3800, 2600)
 
 [node name="Patch1" type="Sprite2D" parent="."]
-position = Vector2(-420, -320)
+position = Vector2(-300, -235)
 texture = ExtResource("8")
 
 [node name="Patch2" type="Sprite2D" parent="."]
-position = Vector2(250, -260)
+position = Vector2(385, -190)
 texture = ExtResource("9")
 
 [node name="Patch3" type="Sprite2D" parent="."]
-position = Vector2(-520, 260)
+position = Vector2(-410, 320)
 texture = ExtResource("10")
 
 [node name="Patch4" type="Sprite2D" parent="."]
-position = Vector2(180, 240)
+position = Vector2(305, 300)
 texture = ExtResource("11")
 
 [node name="Pond" type="Sprite2D" parent="."]
 texture_repeat = 2
-position = Vector2(560, -60)
+position = Vector2(680, 20)
 texture = ExtResource("7")
 region_enabled = true
 region_rect = Rect2(0, 0, 240, 160)
