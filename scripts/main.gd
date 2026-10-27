@@ -148,6 +148,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_craft(false)
 		elif gather.pick_berry(player.position) > 0:
 			player.pop()
+			Sfx.play("pick")
+			_float_text("+野莓", player.position + Vector2(0, -30), Color(1, 0.55, 0.5))
 			_toast("摘到了野莓！已放进背包，明天会再结果")
 		elif player.position.distance_to(decor.SHOP_POS) < 90.0:
 			_toggle_shop(true)
@@ -218,6 +220,8 @@ func _use_tool() -> void:
 	if got != "":
 		Game.add_harvest(got, 1)
 		_toast("收获了%s！" % Game.CROPS[got].name)
+		_float_text("+1 %s" % Game.CROPS[got].name, _cell_center(cell), Color(1, 0.9, 0.35))
+		Sfx.play("harvest")
 		player.pop()
 		return
 	match current_tool:
@@ -235,6 +239,7 @@ func _use_tool() -> void:
 					err = msg
 			if done > 0:
 				player.pop()
+				Sfx.play("hoe")
 				if Game.hoe_level >= 2:
 					_toast("铜锄开垦了 %d 块地" % done)
 			else:
@@ -253,6 +258,7 @@ func _use_tool() -> void:
 					err = msg
 			if done > 0:
 				player.pop()
+				Sfx.play("water")
 				if Game.can_level >= 2:
 					_toast("铜壶浇了 %d 块地" % done)
 			else:
@@ -266,6 +272,7 @@ func _use_tool() -> void:
 			if msg == "":
 				Game.use_seed(id, 1)
 				_toast("种下了%s" % Game.CROPS[id].name)
+				Sfx.play("plant")
 				player.pop()
 			else:
 				_toast(msg)
@@ -280,15 +287,18 @@ func _axe_action() -> void:
 		_toast("体力不够了，回床上睡一觉吧")
 		return
 	var res: Dictionary = gather.hit_at(p)
+	Sfx.play("axe")
 	player.pop()
 	if res.result == "break":
 		var n := 1 + (1 if randf() < 0.3 else 0)
 		if res.kind == "rock":
 			Game.add_item("stone", n)
 			_toast("敲碎了石头！获得石料 x%d" % n)
+			_float_text("+%d 石料" % n, p, Color(0.85, 0.88, 0.95))
 		else:
 			Game.add_item("wood", n)
 			_toast("捡到了木材 x%d" % n)
+			_float_text("+%d 木材" % n, p, Color(0.8, 0.65, 0.45))
 
 
 # ---------- 钓鱼 ----------
@@ -344,6 +354,7 @@ func _update_fishing(delta: float) -> void:
 			fish_state = 2
 			_bite_window = 0.9
 			_bobber.modulate = Color(1.0, 0.45, 0.4)
+			Sfx.play("bite")
 			_toast("咬钩了！快按空格提竿！")
 	elif fish_state == 2:
 		_bite_window -= delta
@@ -409,6 +420,8 @@ func _land_fish() -> void:
 	Game.add_item(pick, 1)
 	_end_fishing()
 	_toast("钓到了%s！已放进背包，去商店卖掉吧" % Game.FISH[pick].name)
+	_float_text("+1 %s" % Game.FISH[pick].name, player.position + Vector2(0, -34), Color(0.55, 0.85, 1))
+	Sfx.play("harvest")
 	player.pop()
 
 
@@ -567,6 +580,7 @@ func _buy(id: String) -> void:
 		return
 	Game.add_gold(-cost)
 	Game.add_seed(id, 1)
+	Sfx.play("coin")
 	_toast("买了 1 包%s种子" % Game.CROPS[id].name)
 
 
@@ -578,6 +592,7 @@ func _sell(id: String, all: bool) -> void:
 	var n := have if all else 1
 	Game.add_gold(n * int(Game.CROPS[id].sell))
 	Game.remove_harvest(id, n)
+	Sfx.play("coin")
 	_toast("卖出%s x%d，赚了 %d 金币" % [Game.CROPS[id].name, n, n * int(Game.CROPS[id].sell)])
 
 
@@ -589,6 +604,7 @@ func _sell_item(cat: Dictionary, id: String, all: bool) -> void:
 	var n := have if all else 1
 	Game.add_item(id, -n)
 	Game.add_gold(n * int(cat[id].sell))
+	Sfx.play("coin")
 	_toast("卖出%s x%d，赚了 %d 金币" % [cat[id].name, n, n * int(cat[id].sell)])
 
 
@@ -601,6 +617,7 @@ func _upgrade(which: String) -> void:
 			return
 		Game.add_gold(-Game.HOE_UP_COST)
 		Game.hoe_level = 2
+		Sfx.play("coin")
 		_toast("锄头升级为铜锄！开垦范围 3x3")
 	else:
 		if Game.can_level >= 2:
@@ -610,6 +627,7 @@ func _upgrade(which: String) -> void:
 			return
 		Game.add_gold(-Game.CAN_UP_COST)
 		Game.can_level = 2
+		Sfx.play("coin")
 		_toast("水壶升级为铜壶！浇水范围 3x3")
 
 
@@ -693,6 +711,7 @@ func _place_at_target() -> void:
 		_toast(msg)
 		return
 	Game.consume(Game.RECIPES[place_mode].cost)
+	Sfx.play("plant")
 	_toast("%s放置成功！" % Game.RECIPES[place_mode].name)
 	place_mode = ""
 	farm.set_preview("", Vector2i.ZERO, false)
@@ -936,6 +955,36 @@ func _update_hint() -> void:
 		txt = "1-6 切换工具 · 空格/左键 使用 · C 制作 · E 互动 · H 帮助"
 	if hint_label.text != txt:
 		hint_label.text = txt
+
+
+## 世界坐标飘字（+N 动作反馈）：上浮并淡出
+func _float_text(txt: String, world_pos: Vector2, col: Color) -> void:
+	var wrap := Node2D.new()
+	wrap.position = world_pos
+	wrap.z_index = 60
+	var l := Label.new()
+	l.text = txt
+	l.add_theme_font_override("font", _ui_font)
+	l.add_theme_font_size_override("font_size", 15)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0.12, 0.09, 0.06))
+	l.add_theme_constant_override("outline_size", 4)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.size = Vector2(140, 20)
+	l.position = Vector2(-70, -30)
+	wrap.add_child(l)
+	add_child(wrap)
+	var tw := wrap.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(wrap, "position:y", world_pos.y - 36.0, 0.95) \
+			.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+	tw.tween_property(wrap, "modulate:a", 0.0, 0.95) \
+			.set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	tw.chain().tween_callback(wrap.queue_free)
+
+
+func _cell_center(c: Vector2i) -> Vector2:
+	return Vector2(c.x * farm.CELL + 16, c.y * farm.CELL + 16)
 
 
 func _toast(msg: String) -> void:

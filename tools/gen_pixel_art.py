@@ -1022,6 +1022,236 @@ def mushroom():
     return upscale(outline(img, (48, 32, 28, 255)))
 
 
+def butterfly():
+    """两帧蝴蝶图集：展翅 / 收翅（12x8 x2）"""
+    pal = {"o": (96, 54, 24), "w": (250, 200, 110), "W": (240, 156, 60), "b": (58, 44, 34)}
+    fa = grid([
+        ".oo......oo.",
+        "owwo....owwo",
+        "oWWo....oWWo",
+        "oWWWWooWWWWo",
+        ".oWoWbbWoWo.",
+        "..o..bb..o..",
+        ".....bb.....",
+        "............",
+    ], pal)
+    fb = grid([
+        "............",
+        "...oo..oo...",
+        "..oWWooWWo..",
+        "...oWbbWo...",
+        "....WbbW....",
+        ".....bb.....",
+        ".....bb.....",
+        "............",
+    ], pal)
+    atlas = Image.new("RGBA", (24, 8), (0, 0, 0, 0))
+    atlas.paste(outline(fa, (60, 36, 20, 255)), (0, 0))
+    atlas.paste(outline(fb, (60, 36, 20, 255)), (12, 0))
+    return upscale(atlas)
+
+
+def cloud_shadow(seed=7, w=200, h=120):
+    """大块柔边云影（alpha 阶梯量化，保持像素风）"""
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    px = img.load()
+    blobs = []
+    for _ in range(5):
+        blobs.append((rng.uniform(w * 0.28, w * 0.72), rng.uniform(h * 0.32, h * 0.68),
+                      rng.uniform(w * 0.16, w * 0.30), rng.uniform(h * 0.20, h * 0.36)))
+    for y in range(h):
+        for x in range(w):
+            v = 0.0
+            for cx, cy, rx, ry in blobs:
+                d = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2
+                if d < 1.0:
+                    v += (1.0 - d) ** 1.5
+            v = min(1.0, v)
+            a = int(v * 4) / 4.0
+            if a > 0:
+                px[x, y] = (14, 22, 40, int(a * 66))
+    return img
+
+
+def leaf():
+    """单片浅色落叶（供粒子 color_initial_ramp 随机着色）"""
+    img = grid([
+        "..ll..",
+        ".llll.",
+        "lllLl.",
+        ".llll.",
+        "..ll..",
+        "..s...",
+    ], {"l": (222, 218, 202), "L": (240, 238, 224), "s": (180, 176, 160)})
+    return upscale(outline(img, (70, 64, 52, 255)))
+
+
+def dust():
+    """脚步尘土小团"""
+    img = grid([
+        "..ww..",
+        ".wwww.",
+        "wwWWww",
+        "wwWWww",
+        ".wwww.",
+        "..ww..",
+    ], {"w": (214, 206, 188), "W": (238, 232, 218)})
+    return upscale(img)
+
+
+# ---------------- 8-bit 音效（wave 模块合成） ----------------
+import math
+import struct
+import wave as wave_mod
+
+SR = 22050
+
+
+def _write_wav(name, samples):
+    with wave_mod.open(os.path.join(OUT, name), "wb") as f:
+        f.setnchannels(1)
+        f.setsampwidth(2)
+        f.setframerate(SR)
+        f.writeframes(b"".join(
+            struct.pack("<h", int(max(-1.0, min(1.0, s)) * 32000)) for s in samples))
+    print("saved", name, "%.2fs" % (len(samples) / float(SR)))
+
+
+def _env(i, n, att=0.005, curve=1.8):
+    """attack + 指数衰减包络"""
+    t = i / float(n)
+    at = min(1.0, t / att) if att > 0 else 1.0
+    return at * (1.0 - t) ** curve
+
+
+def _dur(d):
+    return int(SR * d)
+
+
+def sfx_hoe():
+    """锄地：低频闷响 + 短促摩擦噪声"""
+    rng = random.Random(1)
+    ph = [0.0]
+    n = _dur(0.16)
+
+    def fn(i):
+        t = i / float(n)
+        ph[0] += 95.0 * (1.0 - 0.55 * t) / SR
+        sq = 1.0 if ph[0] % 1.0 < 0.5 else -1.0
+        nz = (rng.random() * 2 - 1) * (0.6 if t < 0.25 else 0.0)
+        return (sq * 0.5 + nz) * _env(i, n, 0.004, 1.8)
+
+    _write_wav("s_hoe.wav", [fn(i) for i in range(n)])
+
+
+def sfx_water():
+    """浇水：低通噪声水花 + 起伏"""
+    rng = random.Random(2)
+    lp = [0.0]
+    n = _dur(0.28)
+
+    def fn(i):
+        t = i / float(n)
+        raw = rng.random() * 2 - 1
+        lp[0] += (raw - lp[0]) * (0.26 - 0.13 * t)
+        wob = 0.75 + 0.25 * math.sin(t * 40)
+        return lp[0] * wob * _env(i, n, 0.01, 1.4) * 2.2
+
+    _write_wav("s_water.wav", [fn(i) for i in range(n)])
+
+
+def sfx_plant():
+    """播种/放置：柔和三角波下落 pop"""
+    ph = [0.0]
+    n = _dur(0.13)
+
+    def fn(i):
+        t = i / float(n)
+        ph[0] += 320.0 * (1.0 - 0.45 * t) / SR
+        tri = 4 * abs(ph[0] % 1.0 - 0.5) - 1
+        return tri * _env(i, n, 0.004, 2.2) * 0.6
+
+    _write_wav("s_plant.wav", [fn(i) for i in range(n)])
+
+
+def sfx_harvest():
+    """收获：C5-E5-G5 上行琶音（方波）"""
+    notes = [523.25, 659.25, 783.99]
+    seg = _dur(0.10)
+    ph = [0.0]
+
+    def fn(i):
+        idx = min(i // seg, 2)
+        ph[0] += notes[idx] / SR
+        sq = 1.0 if ph[0] % 1.0 < 0.5 else -1.0
+        li = i - idx * seg
+        return sq * 0.4 * _env(li, seg, 0.006, 1.6)
+
+    _write_wav("s_harvest.wav", [fn(i) for i in range(seg * 3)])
+
+
+def sfx_coin():
+    """金币：经典 B5->E6 双音"""
+    ph = [0.0]
+    n = _dur(0.28)
+    split = _dur(0.08)
+
+    def fn(i):
+        ph[0] += (987.77 if i < split else 1318.5) / SR
+        sq = 1.0 if ph[0] % 1.0 < 0.5 else -1.0
+        li = i - split if i >= split else i
+        return sq * 0.35 * _env(li, n - split, 0.002, 1.5)
+
+    _write_wav("s_coin.wav", [fn(i) for i in range(n)])
+
+
+def sfx_bite():
+    """鱼咬钩：快速下滑水泡 plop"""
+    ph = [0.0]
+    n = _dur(0.22)
+
+    def fn(i):
+        t = i / float(n)
+        f = 420.0 * (1.0 - 0.72 * t) * (1.0 + 0.08 * math.sin(t * 60))
+        ph[0] += f / SR
+        s = math.sin(ph[0] * 2 * math.pi) * 0.7 + (1.0 if ph[0] % 1.0 < 0.5 else -1.0) * 0.3
+        return s * _env(i, n, 0.004, 1.6)
+
+    _write_wav("s_bite.wav", [fn(i) for i in range(n)])
+
+
+def sfx_pick():
+    """摘野莓：两声三角波 blip"""
+    ph = [0.0]
+    n = _dur(0.15)
+    split = _dur(0.06)
+
+    def fn(i):
+        ph[0] += (660.0 if i < split else 880.0) / SR
+        tri = 4 * abs(ph[0] % 1.0 - 0.5) - 1
+        li = i - split if i >= split else i
+        return tri * 0.55 * _env(li, n - split, 0.004, 1.8)
+
+    _write_wav("s_pick.wav", [fn(i) for i in range(n)])
+
+
+def sfx_axe():
+    """斧镐：噪声脆响 + 低频 thunk"""
+    rng = random.Random(3)
+    ph = [0.0]
+    n = _dur(0.17)
+
+    def fn(i):
+        t = i / float(n)
+        ph[0] += 70.0 / SR
+        sq = 1.0 if ph[0] % 1.0 < 0.5 else -1.0
+        nz = (rng.random() * 2 - 1) * (1.0 - t)
+        return (sq * 0.55 + nz * 0.7) * _env(i, n, 0.002, 2.0)
+
+    _write_wav("s_axe.wav", [fn(i) for i in range(n)])
+
+
 def main():
     save(upscale(tile_grass(1, dots=True)), "grass.png")
     for f in range(4):
@@ -1062,6 +1292,12 @@ def main():
     save(log(), "log.png")
     save(stump(), "stump.png")
     save(mushroom(), "mushroom.png")
+    save(butterfly(), "butterfly.png")
+    save(cloud_shadow(), "cloud_shadow.png")
+    save(leaf(), "leaf.png")
+    save(dust(), "dust.png")
+    for fn in (sfx_hoe, sfx_water, sfx_plant, sfx_harvest, sfx_coin, sfx_bite, sfx_pick, sfx_axe):
+        fn()
     print("done ->", OUT)
 
 

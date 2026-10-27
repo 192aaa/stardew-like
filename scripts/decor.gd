@@ -25,6 +25,9 @@ const TEX_MAILBOX := preload("res://assets/mailbox.png")
 const TEX_LOG := preload("res://assets/log.png")
 const TEX_STUMP := preload("res://assets/stump.png")
 const TEX_MUSHROOM := preload("res://assets/mushroom.png")
+const TEX_BUTTERFLY := preload("res://assets/butterfly.png")
+const TEX_CLOUD := preload("res://assets/cloud_shadow.png")
+const TEX_LEAF := preload("res://assets/leaf.png")
 
 const WATER_FRAMES := [
 	preload("res://assets/water0.png"), preload("res://assets/water1.png"),
@@ -90,12 +93,23 @@ const FIREFLY_BASE := [
 	Vector2(860, 40), Vector2(620, 140), Vector2(770, 120), Vector2(470, -30),
 ]
 
+## 白天氛围：蝴蝶活动点（花田与野花丛）/ 云影初始位置
+const BUTTERFLY_SPOTS := [
+	Vector2(-1170, 660), Vector2(-500, -500), Vector2(650, -250),
+	Vector2(900, 150), Vector2(-80, 120),
+]
+const CLOUD_SEEDS := [
+	Vector2(-900, -620), Vector2(500, 140), Vector2(-350, 760), Vector2(1250, -450),
+]
+
 var sign_font: Font
 var _stones: Array[Vector2] = []
 var _wt := 0.0
 var _glow_window: Sprite2D
 var _glow_lamp: Sprite2D
 var _fireflies: Array[Sprite2D] = []
+var _butterflies: Array[Sprite2D] = []
+var _clouds: Array[Sprite2D] = []
 
 
 func _ready() -> void:
@@ -152,6 +166,7 @@ func _ready() -> void:
 		f.modulate.a = 0.0
 		_fireflies.append(f)
 	_setup_smoke()
+	_setup_ambience()
 	# 碰撞：房屋、商店、池塘、灯柱、树干、水井、信箱、花田栅栏、地图边界
 	_add_blocker_rect(HOUSE_RECT)
 	_add_blocker_rect(STALL_RECT)
@@ -188,6 +203,20 @@ func _process(delta: float) -> void:
 		var b: Vector2 = FIREFLY_BASE[i]
 		f.position = b + Vector2(sin(_wt * 0.7 + i * 1.9) * 26.0, cos(_wt * 0.53 + i * 1.3) * 18.0)
 		f.modulate.a = night * (0.35 + 0.4 * (0.5 + 0.5 * sin(_wt * 2.2 + i)))
+	# 白天氛围：蝴蝶飞舞（入夜淡出）与云影缓慢漂移
+	var day_a := clampf(1.0 - night * 1.6, 0.0, 1.0)
+	for i in _butterflies.size():
+		var b := _butterflies[i]
+		var t := _wt * (0.5 + 0.12 * i) + i * 2.13
+		b.position = BUTTERFLY_SPOTS[i] + Vector2(sin(t) * 54.0, cos(t * 0.77) * 30.0)
+		b.frame = int(_wt * 10.0 + i * 1.7) % 2
+		b.flip_h = sin(t * 0.9) < 0.0
+		b.modulate.a = day_a
+	for i in _clouds.size():
+		var c := _clouds[i]
+		c.position.x += delta * (9.0 + i * 2.5)
+		if c.position.x > 2150.0:
+			c.position.x = -2150.0
 
 
 func _scatter_detail() -> void:
@@ -220,6 +249,64 @@ func _scatter_detail() -> void:
 			var tex := TEX_TUFT if rng.randf() < 0.72 else TEX_STONE
 			_add_sprite(tex, p)
 			placed += 1
+
+
+## 白天氛围：云影 / 蝴蝶 / 树冠落叶
+func _setup_ambience() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 21
+	for i in CLOUD_SEEDS.size():
+		var c := Sprite2D.new()
+		c.texture = TEX_CLOUD
+		c.position = CLOUD_SEEDS[i]
+		var sc := 1.6 + rng.randf() * 0.9
+		c.scale = Vector2(sc, sc * (0.8 + rng.randf() * 0.3))
+		c.z_index = 1
+		c.modulate.a = 0.9
+		add_child(c)
+		_clouds.append(c)
+	for p in BUTTERFLY_SPOTS:
+		var b := Sprite2D.new()
+		b.texture = TEX_BUTTERFLY
+		b.hframes = 2
+		b.position = p
+		b.z_index = 1
+		add_child(b)
+		_butterflies.append(b)
+	for i in range(0, TREES.size(), 2):
+		_add_leaf_rain(TREES[i] + Vector2(0, -30))
+
+
+## 树冠飘落树叶（随机秋叶色、旋转飘落、落地图形淡出）
+func _add_leaf_rain(pos: Vector2) -> void:
+	var p := CPUParticles2D.new()
+	p.texture = TEX_LEAF
+	p.position = pos
+	p.amount = 3
+	p.lifetime = 3.4
+	p.preprocess = 3.0
+	p.emission_shape = CPUParticles2D.EMISSION_SHAPE_SPHERE
+	p.emission_sphere_radius = 20.0
+	p.direction = Vector2(0.25, 1)
+	p.spread = 24.0
+	p.gravity = Vector2(0, 10)
+	p.initial_velocity_min = 3.0
+	p.initial_velocity_max = 9.0
+	p.angular_velocity_min = -80.0
+	p.angular_velocity_max = 80.0
+	p.scale_amount_min = 0.7
+	p.scale_amount_max = 1.1
+	var autumn := Gradient.new()  # 随机初始色：绿→琥珀→赭石
+	autumn.set_color(0, Color(0.45, 0.62, 0.3))
+	autumn.add_point(0.5, Color(0.8, 0.62, 0.25))
+	autumn.set_color(1, Color(0.75, 0.42, 0.22))
+	p.color_initial_ramp = autumn
+	var g := Gradient.new()
+	g.set_color(0, Color(1, 1, 1, 0.95))
+	g.set_color(1, Color(1, 1, 1, 0))
+	p.color_ramp = g
+	p.emitting = true
+	add_child(p)
 
 
 func _add_material() -> CanvasItemMaterial:
