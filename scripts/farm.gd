@@ -9,9 +9,10 @@ const TEX_SCARECROW := preload("res://assets/scarecrow.png")
 const TEX_SPRINKLER := preload("res://assets/sprinkler.png")
 const TEX_MACHINE_MAYO := preload("res://assets/machine_mayo.png")
 const TEX_MACHINE_JAM := preload("res://assets/machine_jam.png")
+const TEX_STOVE := preload("res://assets/stove.png")
 const SCARE_RADIUS := 150.0
 ## 作物 -> 图集列（每株占 4 列：苗/小/大/成熟）
-const CROP_COL := {"parsnip": 0, "potato": 4, "straw": 8, "pumpkin": 12}
+const CROP_COL := {"parsnip": 0, "potato": 4, "straw": 8, "pumpkin": 12, "corn": 16, "blue": 20}
 const ZONES := [
 	Rect2(-420, -320, 240, 170),
 	Rect2(250, -260, 270, 140),
@@ -108,7 +109,8 @@ func try_plant(c: Vector2i, id: String) -> String:
 	return ""
 
 
-## 收获成熟作物，返回作物 id；无则返回 ""
+## 收获成熟作物，返回作物 id；无则返回 ""。
+## 多季作物（regrow>0）收获后保留植株，回退 regrow 节继续长，不用重种
 func try_harvest(c: Vector2i) -> String:
 	if not tiles.has(c):
 		return ""
@@ -116,7 +118,11 @@ func try_harvest(c: Vector2i) -> String:
 	if t.crop == "" or t.stage < Game.CROPS[t.crop].days:
 		return ""
 	var id: String = t.crop
-	tiles.erase(c)
+	var regrow: int = int(Game.CROPS[id].get("regrow", 0))
+	if regrow > 0:
+		t.stage = maxi(1, int(Game.CROPS[id].days) - regrow)
+	else:
+		tiles.erase(c)
 	queue_redraw()
 	return id
 
@@ -211,8 +217,10 @@ func on_new_day(raining := false) -> int:
 			if tiles.has(n) and tiles[n].crop != "":
 				tiles[n].watered = true
 				tiles[n].wtoday = true
-	for c in machines:  # 加工机过夜把原料变成产品
+	for c in machines:  # 加工机过夜把原料变成产品（灶台无转化，跳过）
 		var m: Dictionary = machines[c]
+		if not Game.MACHINE_INPUTS.has(m.type):
+			continue
 		if m.input != "" and m.ready == "":
 			var want: Dictionary = Game.MACHINE_INPUTS[m.type]
 			if want.has(m.input):
@@ -257,16 +265,23 @@ func _draw() -> void:
 		var r := Rect2(c.x * CELL, c.y * CELL, CELL, CELL)
 		draw_texture_rect(TEX_SOIL_WET if t.watered else TEX_SOIL, r, false)
 		if t.crop != "":
-			# 图集：每株作物占 4 列（苗/小/大/成熟），列偏移见 CROP_COL
-			var idx: int = mini(t.stage, 3)
+			# 图集：每株作物占 4 列（苗/小/大/成熟），按生长进度取列，熟透才画成熟贴图
+			var days: int = Game.CROPS[t.crop].days
+			var idx: int = clampi(int(floor(t.stage * 3.0 / days)), 0, 3)
 			var col: int = CROP_COL[t.crop]
 			draw_texture_rect_region(TEX_CROPS, r, Rect2((col + idx) * CELL, 0, CELL, CELL))
 	for s in sprinklers:
 		draw_texture_rect(TEX_SPRINKLER, Rect2(s.x * CELL, s.y * CELL, CELL, CELL), false)
 	for c in machines:
 		var m: Dictionary = machines[c]
-		var tex := TEX_MACHINE_MAYO if m.type == "mayo" else TEX_MACHINE_JAM
-		var mh := 24.0 if m.type == "mayo" else 22.0
+		var tex: Texture2D = TEX_MACHINE_MAYO
+		var mh := 24.0
+		if m.type == "jam":
+			tex = TEX_MACHINE_JAM
+			mh = 22.0
+		elif m.type == "stove":
+			tex = TEX_STOVE
+			mh = 28.0
 		draw_texture_rect(tex, Rect2(c.x * CELL, c.y * CELL + CELL - mh, CELL, mh), false)
 		if m.ready != "":  # 完工标记：机器上方亮一颗金星
 			draw_rect(Rect2(c.x * CELL + 13, c.y * CELL - 12, 6, 6), Color(1, 0.9, 0.3))
@@ -284,10 +299,17 @@ func _draw() -> void:
 		elif _preview == "sprinkler":
 			pr = Rect2(_preview_cell.x * CELL, _preview_cell.y * CELL, CELL, CELL)
 			ptex = TEX_SPRINKLER
-		else:  # 加工机预览
-			var pmh := 24.0 if _preview == "mayo" else 22.0
+		else:  # 加工机/灶台预览
+			var pmh := 24.0
+			if _preview == "jam":
+				pmh = 22.0
+				ptex = TEX_MACHINE_JAM
+			elif _preview == "stove":
+				pmh = 28.0
+				ptex = TEX_STOVE
 			pr = Rect2(_preview_cell.x * CELL, _preview_cell.y * CELL + CELL - pmh, CELL, pmh)
-			ptex = TEX_MACHINE_MAYO if _preview == "mayo" else TEX_MACHINE_JAM
+			if _preview == "mayo":
+				ptex = TEX_MACHINE_MAYO
 		draw_texture_rect(ptex, pr, false, Color(1, 1, 1, 0.55))
 	if _target_valid:
 		var trect := Rect2(_target.x * CELL + 1, _target.y * CELL + 1, CELL - 2, CELL - 2)

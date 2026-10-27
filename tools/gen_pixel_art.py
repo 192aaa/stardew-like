@@ -440,6 +440,8 @@ PAL_C = {
     "d": (58, 108, 44), "t": (150, 108, 62), "T": (118, 82, 46),
     "r": (214, 66, 56), "R": (168, 44, 42), "f": (242, 242, 226),
     "n": (232, 128, 44), "N": (196, 92, 32),
+    "c": (238, 204, 76), "C": (198, 162, 50), "u": (246, 238, 196),
+    "B": (86, 122, 216), "b": (54, 82, 172), "L": (150, 190, 245),
 }
 
 
@@ -763,12 +765,174 @@ def crop_pumpkin(stage):
     return rows
 
 
+def crop_corn(stage):
+    if stage == 0:
+        rows = [
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            ".......g........",
+            "......gg........",
+            "....g.og........",
+            ".....gog.g......",
+            "......og.g......",
+            ".......og.......",
+            "................",
+            "................",
+        ]
+    elif stage == 1:
+        rows = [
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            ".......g........",
+            "....g.gg.g......",
+            "...gg.og.gg.....",
+            "....ggog.gg.....",
+            ".....oogg.......",
+            "......ogg.......",
+            "......ogg.......",
+            "......oGg.......",
+            "................",
+            "................",
+            "................",
+        ]
+    elif stage == 2:
+        rows = [
+            "................",
+            "................",
+            "................",
+            "......u.g.......",
+            "...g..g.gg..g...",
+            "..gg.g.og..gg...",
+            "...ggg.og.gg....",
+            "....ggooggg.....",
+            "......ogg.g.....",
+            ".....gogg.......",
+            ".....gogg.g.....",
+            "......ogg.......",
+            "......oGg.......",
+            "......oGg.......",
+            "................",
+            "................",
+        ]
+    else:
+        rows = [
+            "................",
+            "................",
+            ".....uu.uu......",
+            "...g.u.g.u.g....",
+            "..gg.g.og.gg....",
+            "...gggcogc.gg...",
+            "....ggcocc.gg...",
+            ".....occccog....",
+            "...g.occcc.g....",
+            "..gg.gogg.gg....",
+            "...gggogg.g.....",
+            "....ggogg.gg....",
+            ".....gogg.g.....",
+            "......ogg.......",
+            "......oGg.......",
+            "................",
+        ]
+    return rows
+
+
+def crop_blueberry(stage):
+    if stage == 0:
+        rows = [
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            ".....gg.g.......",
+            "....gogg.g......",
+            ".....ogg........",
+            "......og........",
+            "................",
+            "................",
+            "................",
+        ]
+    elif stage == 1:
+        rows = [
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "................",
+            "....gg...gg.....",
+            "..gggg.ggggg....",
+            "..ggggggg.ggg...",
+            "...ogggggggg....",
+            "....ogggggg.....",
+            ".....ogggg......",
+            ".....oGGg.......",
+            "................",
+            "................",
+            "................",
+        ]
+    elif stage == 2:
+        rows = [
+            "................",
+            "................",
+            "................",
+            "....gg....gg....",
+            "..gggg..ggggg...",
+            ".ggggggggggggg..",
+            ".gggLLggggLLgg..",
+            "..ggggggggggg...",
+            "...ogggggggg....",
+            "....oggggggg....",
+            ".....oggggg.....",
+            "......oGGg......",
+            ".....oGGGg......",
+            "................",
+            "................",
+            "................",
+        ]
+    else:
+        rows = [
+            "................",
+            "................",
+            "...gg.....gg....",
+            "..gggg.gggggg...",
+            ".ggggggggggggg..",
+            ".ggBBgggggBBgg..",
+            "ggBBBbgggBBBbgg.",
+            ".ggBbbgggBbbgg..",
+            "..ggBBggggBBg...",
+            "...ogggggggg....",
+            "....oggggggg....",
+            ".....oggggg.....",
+            "......oGGg......",
+            ".....oGGGg......",
+            "................",
+            "................",
+        ]
+    return rows
+
+
 def crops_atlas():
-    art = Image.new("RGBA", (16 * 16, 16), (0, 0, 0, 0))
+    art = Image.new("RGBA", (16 * 24, 16), (0, 0, 0, 0))
     order = [crop_parsnip(0), crop_parsnip(1), crop_parsnip(2), crop_parsnip(3),
              crop_potato(0), crop_potato(1), crop_potato(2), crop_potato(3),
              crop_strawberry(0), crop_strawberry(1), crop_strawberry(2), crop_strawberry(3),
-             crop_pumpkin(0), crop_pumpkin(1), crop_pumpkin(2), crop_pumpkin(3)]
+             crop_pumpkin(0), crop_pumpkin(1), crop_pumpkin(2), crop_pumpkin(3),
+             crop_corn(0), crop_corn(1), crop_corn(2), crop_corn(3),
+             crop_blueberry(0), crop_blueberry(1), crop_blueberry(2), crop_blueberry(3)]
     for i, rows in enumerate(order):
         art.paste(outline(grid(rows, PAL_C), (30, 42, 24, 255)), (i * 16, 0))
     return upscale(art)
@@ -1591,6 +1755,30 @@ def machine_jam():
     return upscale(outline(img, (40, 30, 22, 255)))
 
 
+def stove():
+    """灶台：石砌炉身 + 黑铁锅 + 炉膛火光"""
+    img = grid([
+        "......pppp......",
+        ".....opppppo....",
+        "....opppppppo...",
+        "...oooooooooo...",
+        "..okkKKkkkKKko..",
+        "..okkkKKkkkkko..",
+        "..oKKkkkKKkkko..",
+        "..okkkkkkkKKko..",
+        "..okkfFFfkkkko..",
+        "..okffFFffkkko..",
+        "..okkfFFfkkkko..",
+        "..okkkkkkkkkko..",
+        "..okkKKkkkKKko..",
+        "...oooooooooo...",
+    ], {
+        "o": (40, 30, 24), "p": (46, 42, 46), "k": (108, 100, 108),
+        "K": (146, 138, 144), "f": (226, 108, 40), "F": (248, 186, 80),
+    })
+    return upscale(outline(img, (36, 26, 20, 255)))
+
+
 def ore_node(vein):
     """矿岩节点：灰岩块 + 彩色矿脉（铜/铁/宝石）"""
     img = grid([
@@ -2014,6 +2202,7 @@ def main():
     save(egg(), "egg.png")
     save(machine_mayo(), "machine_mayo.png")
     save(machine_jam(), "machine_jam.png")
+    save(stove(), "stove.png")
     save(ore_node((222, 120, 60)), "ore_copper.png")
     save(ore_node((210, 212, 224)), "ore_iron.png")
     save(ore_node((140, 116, 232)), "ore_gem.png")
