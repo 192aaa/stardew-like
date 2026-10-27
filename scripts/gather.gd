@@ -92,6 +92,8 @@ func _free(p: Vector2) -> bool:
 		return false
 	if p.distance_to(DECOR.LOG_POS) < 44.0 or p.distance_to(DECOR.STUMP_POS) < 44.0:
 		return false
+	if p.distance_to(DECOR.BOARD_POS) < 60.0 or p.distance_to(DECOR.COOP_POS) < 70.0:
+		return false
 	if DECOR.GARDEN_RECT.grow(28).has_point(p):
 		return false
 	for b in DECOR.BUSH_SPOTS:

@@ -1446,6 +1446,108 @@ def dust():
     return upscale(img)
 
 
+def order_board():
+    """订单任务牌：木板 + 钉着白纸（画了几行字）"""
+    rows = [
+        "....oooooooooooooooo....",
+        "...ohhhhhhhhhhhhhhhho...",
+        "...ohHHHHHHHHHHHHHHho...",
+        "...ohhpppppppppppphho...",
+        "...ohhppPPpppppppphho...",
+        "...ohhpppppppppppphho...",
+        "...ohhpppllllppppphho...",
+        "...ohhpppppllllppphho...",
+        "...ohhpppllllppppphho...",
+        "...ohhpppppppppppphho...",
+        "...ohhhhhhhhhhhhhhhho...",
+        "....oooooooooooooooo....",
+        ".........oppo...........",
+        ".........oppo...........",
+        ".........oppo...........",
+        ".........oppo...........",
+        ".........oppo...........",
+        ".........oppo...........",
+        ".........oppo...........",
+        ".........oppo...........",
+        ".........oppo...........",
+        ".........oppo...........",
+        "........ooppppoo........",
+        "........oooooooo........",
+    ], {
+        "o": (56, 40, 28), "h": (150, 108, 64), "H": (176, 132, 82),
+        "p": (238, 232, 214), "P": (208, 72, 58), "l": (150, 150, 150),
+    }
+    img = grid(rows[0], rows[1])
+    return upscale(outline(img, (46, 34, 26, 255)))
+
+
+def coop():
+    """鸡舍：小木屋 + 红瓦坡顶 + 门洞 + 小坡道"""
+    w, h = 44, 38
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    # 墙
+    d.rectangle((4, 16, 39, 35), fill=(196, 150, 100, 255))
+    for y in range(20, 35, 5):
+        d.line((4, y, 39, y), fill=(170, 128, 84, 255))
+    # 屋顶
+    d.polygon([(0, 18), (22, 2), (43, 18)], fill=(180, 84, 64, 255))
+    for y in range(4, 18, 4):
+        x0 = 22 - (y - 2) * 21 // 16
+        x1 = 22 + (y - 2) * 21 // 16
+        d.line((max(x0, 0), y, min(x1, 43), y), fill=(148, 64, 50, 255))
+    d.line((0, 18, 43, 18), fill=(120, 52, 42, 255))
+    # 门洞
+    d.rectangle((16, 24, 27, 35), fill=(74, 50, 34, 255))
+    d.rectangle((18, 26, 25, 35), fill=(94, 64, 44, 255))
+    # 小窗
+    d.rectangle((8, 22, 13, 27), fill=(240, 214, 130, 255))
+    # 坡道
+    d.polygon([(16, 35), (27, 35), (31, 37), (12, 37)], fill=(150, 108, 64, 255))
+    return upscale(outline(img, (52, 40, 32, 255)))
+
+
+def chicken_sheet():
+    """白母鸡两帧（站立 / 迈步），侧面朝右，flip_h 转向"""
+    pal = {
+        "o": (54, 42, 32), "w": (246, 242, 230), "W": (214, 206, 192),
+        "e": (40, 36, 30), "y": (238, 170, 60), "r": (210, 70, 60),
+    }
+    top = [
+        "....ooooo.......",
+        "...orrrrro......",
+        "...owwwwwo......",
+        "...owewwwwo.....",
+        "...owwwwwyyo....",
+        "....oowwwyyo....",
+        "...owwwwoo......",
+        "..owwwwwwo......",
+        ".owwwwwwwwo.....",
+        ".owwwwwwwwo.....",
+        ".oWwwwwwwWo.....",
+        "..owwwwwo.......",
+    ]
+    f1 = top + ["...oo.oo........"]
+    f2 = top + ["..oo...oo......."]
+    atlas = Image.new("RGBA", (32, 13), (0, 0, 0, 0))
+    atlas.paste(outline(grid(f1, pal), (48, 38, 30, 255)), (0, 0))
+    atlas.paste(outline(grid(f2, pal), (48, 38, 30, 255)), (16, 0))
+    return upscale(atlas)
+
+
+def egg():
+    """一颗白鸡蛋"""
+    img = grid([
+        "..oooo..",
+        ".owwwo..",
+        "owwWwwo.",
+        "owwwwwo.",
+        "oWwwwWo.",
+        ".ooooo..",
+    ], {"o": (150, 120, 70), "w": (246, 238, 214), "W": (222, 210, 182)})
+    return upscale(outline(img, (110, 88, 52, 255)))
+
+
 # ---------------- 8-bit 音效（wave 模块合成） ----------------
 import math
 import struct
@@ -1763,6 +1865,10 @@ def main():
     save(dust(), "dust.png")
     save(npc_sheet(PAL_ROSA, ROSA_DOWN, ROSA_UP, ROSA_SIDE), "villager_rosa.png")
     save(npc_sheet(PAL_BEN, BEN_DOWN, BEN_UP, BEN_SIDE), "villager_ben.png")
+    save(order_board(), "order_board.png")
+    save(coop(), "coop.png")
+    save(chicken_sheet(), "chicken.png")
+    save(egg(), "egg.png")
     for fn in (sfx_hoe, sfx_water, sfx_plant, sfx_harvest, sfx_coin, sfx_bite, sfx_pick, sfx_axe,
                sfx_talk, sfx_rain):
         fn()

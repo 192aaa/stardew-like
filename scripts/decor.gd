@@ -28,6 +28,8 @@ const TEX_MUSHROOM := preload("res://assets/mushroom.png")
 const TEX_BUTTERFLY := preload("res://assets/butterfly.png")
 const TEX_CLOUD := preload("res://assets/cloud_shadow.png")
 const TEX_LEAF := preload("res://assets/leaf.png")
+const TEX_BOARD := preload("res://assets/order_board.png")
+const TEX_COOP := preload("res://assets/coop.png")
 
 const WATER_FRAMES := [
 	preload("res://assets/water0.png"), preload("res://assets/water1.png"),
@@ -50,6 +52,17 @@ const STUMP_POS := Vector2(-1420, -180)
 const BUSH_SPOTS := [
 	Vector2(-560, -880), Vector2(-430, -945), Vector2(-295, -865),
 	Vector2(-150, -950), Vector2(-680, -985), Vector2(-30, -830),
+]
+## 订单任务牌（货摊右侧）
+const BOARD_POS := Vector2(810, -330)
+## 鸡舍与鸡的散步区（屋旁空地）
+const COOP_POS := Vector2(-480, -500)
+const COOP_ROAM := Rect2(-540, -450, 140, 100)
+## 鸡蛋堆放点（鸡舍门前，最多 10 颗）
+const EGG_SPOTS := [
+	Vector2(-512, -452), Vector2(-492, -458), Vector2(-472, -452), Vector2(-452, -458),
+	Vector2(-522, -438), Vector2(-502, -444), Vector2(-482, -438), Vector2(-462, -444),
+	Vector2(-532, -424), Vector2(-512, -430),
 ]
 const MUSHROOM_POS := [
 	Vector2(-1090, 320), Vector2(-1180, 760), Vector2(1120, 480),
@@ -143,6 +156,11 @@ func _ready() -> void:
 	_add_sprite(TEX_MAILBOX, MAILBOX_POS)
 	_add_sprite(TEX_LOG, LOG_POS)
 	_add_sprite(TEX_STUMP, STUMP_POS)
+	# 订单任务牌 / 鸡舍
+	_add_sprite(TEX_SHADOW, BOARD_POS + Vector2(0, 10))
+	_add_sprite(TEX_BOARD, BOARD_POS)
+	_add_sprite(TEX_SHADOW, COOP_POS + Vector2(0, 16))
+	_add_sprite(TEX_COOP, COOP_POS + Vector2(0, -6))
 	for p in MUSHROOM_POS:
 		_add_sprite(TEX_MUSHROOM, p)
 	for p in BUSH_SPOTS:
@@ -167,11 +185,13 @@ func _ready() -> void:
 		_fireflies.append(f)
 	_setup_smoke()
 	_setup_ambience()
-	# 碰撞：房屋、商店、池塘、灯柱、树干、水井、信箱、花田栅栏、地图边界
+	# 碰撞：房屋、商店、池塘、灯柱、树干、水井、信箱、花田栅栏、任务牌、鸡舍、地图边界
 	_add_blocker_rect(HOUSE_RECT)
 	_add_blocker_rect(STALL_RECT)
 	_add_blocker_rect(POND_RECT)
 	_add_blocker_circle(LAMP_POS, 6.0)
+	_add_blocker_circle(BOARD_POS, 9.0)
+	_add_blocker_circle(COOP_POS, 20.0)
 	for p in TREES:
 		_add_blocker_circle(p + Vector2(0, 16), 12.0)
 	_add_blocker_circle(WELL_POS, 18.0)
@@ -234,7 +254,8 @@ func _scatter_detail() -> void:
 			blocked = true
 		if GARDEN_RECT.grow(26).has_point(p) or p.distance_to(WELL_POS) < 70 \
 				or p.distance_to(MAILBOX_POS) < 40 or p.distance_to(LOG_POS) < 44 \
-				or p.distance_to(STUMP_POS) < 40:
+				or p.distance_to(STUMP_POS) < 40 or p.distance_to(BOARD_POS) < 60 \
+				or p.distance_to(COOP_POS) < 70:
 			blocked = true
 		for b in BUSH_SPOTS:
 			if p.distance_to(b) < 56:
