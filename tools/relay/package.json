@@ -1,0 +1,12 @@
+{
+  "name": "stardewlike-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "双人联机房间码中继服务器",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
