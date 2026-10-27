@@ -1548,6 +1548,149 @@ def egg():
     return upscale(outline(img, (110, 88, 52, 255)))
 
 
+def machine_mayo():
+    """蛋黄酱机：木箱机身 + 顶部玻璃罐（装蛋黄酱）+ 侧面摇柄"""
+    img = grid([
+        "......oooo......",
+        ".....oggggo.....",
+        ".....ogYYgo.....",
+        ".....ogYYgo.....",
+        ".....oggggo.....",
+        "...oooooooooo..c",
+        "...oBBBBBBBBo..c",
+        "...obBBBBBBbo..c",
+        "...obBBBBBBbo.oc",
+        "...obbbbbbbbo.oc",
+        "...oooooooooo.o.",
+        "....oo....oo....",
+    ], {
+        "o": (56, 42, 30), "g": (208, 224, 232), "Y": (242, 206, 92),
+        "B": (198, 152, 102), "b": (172, 128, 84), "c": (122, 120, 130),
+    })
+    return upscale(outline(img, (44, 34, 26, 255)))
+
+
+def machine_jam():
+    """食品加工机：铜锅 + 红色果酱 + 底座炉身"""
+    img = grid([
+        ".....oooooo.....",
+        "....okkkkkko....",
+        "...okrrRRrrko...",
+        "...okrRRRRrko...",
+        "...okrrRRrrko...",
+        "...okkkkkkkko...",
+        ".....o....o.....",
+        "...okkkkkkkko...",
+        "...okKKKKKKko...",
+        "...okkkkkkkko...",
+        "....oooooooo....",
+    ], {
+        "o": (50, 36, 26), "k": (160, 96, 62), "K": (206, 132, 84),
+        "r": (196, 60, 52), "R": (232, 104, 84),
+    })
+    return upscale(outline(img, (40, 30, 22, 255)))
+
+
+def ore_node(vein):
+    """矿岩节点：灰岩块 + 彩色矿脉（铜/铁/宝石）"""
+    img = grid([
+        "....oooooo....",
+        "..oorrrrrroo..",
+        ".orrRRrrrrrro.",
+        ".orvvvRrrrrro.",
+        "orrRvvrrrrRrro",
+        "orrrrrrrvvRrro",
+        "orrvvRrrrrrrro",
+        ".orrrrvvRrrro.",
+        "..oorrrrrroo..",
+        "....oooooo....",
+    ], {
+        "o": (58, 56, 64), "r": (138, 136, 148), "R": (168, 166, 178), "v": vein,
+    })
+    return upscale(outline(img, (40, 38, 46, 255)))
+
+
+def mine_arch():
+    """矿洞入口：石拱 + 黑洞口 + 支撑木梁"""
+    w, h = 30, 26
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.polygon([(1, 25), (1, 12), (8, 3), (21, 3), (28, 12), (28, 25)],
+              fill=(128, 124, 134, 255))
+    d.polygon([(4, 25), (4, 13), (9, 6), (20, 6), (25, 13), (25, 25)],
+              fill=(152, 148, 158, 255))
+    d.polygon([(8, 25), (8, 14), (11, 9), (18, 9), (21, 14), (21, 25)],
+              fill=(28, 24, 34, 255))
+    d.polygon([(10, 25), (10, 15), (12, 11), (17, 11), (19, 15), (19, 25)],
+              fill=(14, 12, 20, 255))
+    d.rectangle((7, 8, 9, 25), fill=(110, 78, 50, 255))
+    d.rectangle((20, 8, 22, 25), fill=(110, 78, 50, 255))
+    d.rectangle((6, 5, 23, 8), fill=(130, 92, 58, 255))
+    return upscale(outline(img, (46, 42, 50, 255)))
+
+
+def pet_sheet(body, legs_a, legs_b, pal):
+    """两帧侧面宠物精灵表：身体 + 两组腿部姿势，横排成图集"""
+    w = len(body[0])
+    h = len(body) + len(legs_a)
+    atlas = Image.new("RGBA", (w * 2, h), (0, 0, 0, 0))
+    atlas.paste(outline(grid(body + legs_a, pal), (56, 42, 32, 255)), (0, 0))
+    atlas.paste(outline(grid(body + legs_b, pal), (56, 42, 32, 255)), (w, 0))
+    return upscale(atlas)
+
+
+CAT_BODY = [
+    ".oo.oo..........",
+    ".occooo.........",
+    ".occccco........",
+    ".ocecccco.......",
+    ".occccccoooooo..",
+    ".occcccccccccco.",
+    ".ocCcccccccccCo.",
+    "..occccccccccCo.",
+    "..occccccccco.oo",
+    "..occcccccco..oo",
+]
+CAT_LEGS_A = ["..oo..oo........"]
+CAT_LEGS_B = ["...oo....oo....."]
+CAT_PAL = {
+    "o": (74, 56, 42), "c": (224, 150, 90), "C": (240, 182, 122),
+    "e": (40, 36, 30),
+}
+
+DOG_BODY = [
+    ".oo.............",
+    ".oo..ooo........",
+    ".oooocddoo......",
+    ".oddeddddo......",
+    ".odddddddooooo..",
+    ".odwddddddddddo.",
+    ".oDwddddddddddo.",
+    "..oddddddddddo..",
+    "..odddddddddo.o.",
+    "..oddddddddo....",
+]
+DOG_LEGS_A = ["..oo..oo........"]
+DOG_LEGS_B = ["...oo....oo....."]
+DOG_PAL = {
+    "o": (74, 56, 42), "d": (172, 124, 80), "D": (196, 146, 98),
+    "e": (40, 36, 30), "w": (250, 246, 238),
+}
+
+
+def bunting():
+    """节日彩旗：一根绳 + 红黄绿蓝三角旗交替"""
+    w, h = 96, 12
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.line((0, 2, 95, 2), fill=(140, 110, 70, 255))
+    cols = [(214, 80, 66), (240, 200, 90), (110, 180, 100), (110, 150, 220)]
+    for i in range(8):
+        x0 = 3 + i * 12
+        d.polygon([(x0, 3), (x0 + 8, 3), (x0 + 4, 11)], fill=cols[i % 4] + (255,))
+    return upscale(outline(img, (60, 46, 32, 255)))
+
+
 # ---------------- 8-bit 音效（wave 模块合成） ----------------
 import math
 import struct
@@ -1869,6 +2012,15 @@ def main():
     save(coop(), "coop.png")
     save(chicken_sheet(), "chicken.png")
     save(egg(), "egg.png")
+    save(machine_mayo(), "machine_mayo.png")
+    save(machine_jam(), "machine_jam.png")
+    save(ore_node((222, 120, 60)), "ore_copper.png")
+    save(ore_node((210, 212, 224)), "ore_iron.png")
+    save(ore_node((140, 116, 232)), "ore_gem.png")
+    save(mine_arch(), "mine_arch.png")
+    save(pet_sheet(CAT_BODY, CAT_LEGS_A, CAT_LEGS_B, CAT_PAL), "pet_cat.png")
+    save(pet_sheet(DOG_BODY, DOG_LEGS_A, DOG_LEGS_B, DOG_PAL), "pet_dog.png")
+    save(bunting(), "bunting.png")
     for fn in (sfx_hoe, sfx_water, sfx_plant, sfx_harvest, sfx_coin, sfx_bite, sfx_pick, sfx_axe,
                sfx_talk, sfx_rain):
         fn()

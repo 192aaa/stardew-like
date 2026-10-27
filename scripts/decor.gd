@@ -30,6 +30,8 @@ const TEX_CLOUD := preload("res://assets/cloud_shadow.png")
 const TEX_LEAF := preload("res://assets/leaf.png")
 const TEX_BOARD := preload("res://assets/order_board.png")
 const TEX_COOP := preload("res://assets/coop.png")
+const TEX_MINE := preload("res://assets/mine_arch.png")
+const TEX_BUNTING := preload("res://assets/bunting.png")
 
 const WATER_FRAMES := [
 	preload("res://assets/water0.png"), preload("res://assets/water1.png"),
@@ -64,6 +66,9 @@ const EGG_SPOTS := [
 	Vector2(-522, -438), Vector2(-502, -444), Vector2(-482, -438), Vector2(-462, -444),
 	Vector2(-532, -424), Vector2(-512, -430),
 ]
+## 东侧矿洞：入口拱门与矿岩刷新区
+const MINE_POS := Vector2(1480, 240)
+const MINE_ZONE := Rect2(1240, 60, 460, 400)
 const MUSHROOM_POS := [
 	Vector2(-1090, 320), Vector2(-1180, 760), Vector2(1120, 480),
 	Vector2(1560, -820), Vector2(-1560, -620), Vector2(1340, 900),
@@ -123,6 +128,7 @@ var _glow_lamp: Sprite2D
 var _fireflies: Array[Sprite2D] = []
 var _butterflies: Array[Sprite2D] = []
 var _clouds: Array[Sprite2D] = []
+var _bunting: Sprite2D
 
 
 func _ready() -> void:
@@ -161,6 +167,11 @@ func _ready() -> void:
 	_add_sprite(TEX_BOARD, BOARD_POS)
 	_add_sprite(TEX_SHADOW, COOP_POS + Vector2(0, 16))
 	_add_sprite(TEX_COOP, COOP_POS + Vector2(0, -6))
+	# 东侧矿洞入口 / 节日彩旗（默认收起，节日当天挂出）
+	_add_sprite(TEX_SHADOW, MINE_POS + Vector2(0, 24))
+	_add_sprite(TEX_MINE, MINE_POS + Vector2(0, -2))
+	_bunting = _add_sprite(TEX_BUNTING, Vector2(670, -368))
+	_bunting.visible = false
 	for p in MUSHROOM_POS:
 		_add_sprite(TEX_MUSHROOM, p)
 	for p in BUSH_SPOTS:
@@ -192,6 +203,7 @@ func _ready() -> void:
 	_add_blocker_circle(LAMP_POS, 6.0)
 	_add_blocker_circle(BOARD_POS, 9.0)
 	_add_blocker_circle(COOP_POS, 20.0)
+	_add_blocker_circle(MINE_POS + Vector2(0, 6), 24.0)
 	for p in TREES:
 		_add_blocker_circle(p + Vector2(0, 16), 12.0)
 	_add_blocker_circle(WELL_POS, 18.0)
@@ -239,6 +251,12 @@ func _process(delta: float) -> void:
 			c.position.x = -2150.0
 
 
+## 节日开关：节日当天在货摊前挂出彩旗
+func set_festival(on: bool) -> void:
+	if _bunting:
+		_bunting.visible = on
+
+
 func _scatter_detail() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 99
@@ -256,6 +274,8 @@ func _scatter_detail() -> void:
 				or p.distance_to(MAILBOX_POS) < 40 or p.distance_to(LOG_POS) < 44 \
 				or p.distance_to(STUMP_POS) < 40 or p.distance_to(BOARD_POS) < 60 \
 				or p.distance_to(COOP_POS) < 70:
+			blocked = true
+		if MINE_ZONE.grow(14).has_point(p):
 			blocked = true
 		for b in BUSH_SPOTS:
 			if p.distance_to(b) < 56:

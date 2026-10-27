@@ -7,6 +7,8 @@ const TEX_SOIL_WET := preload("res://assets/soil_wet.png")
 const TEX_CROPS := preload("res://assets/crops.png")
 const TEX_SCARECROW := preload("res://assets/scarecrow.png")
 const TEX_SPRINKLER := preload("res://assets/sprinkler.png")
+const TEX_MACHINE_MAYO := preload("res://assets/machine_mayo.png")
+const TEX_MACHINE_JAM := preload("res://assets/machine_jam.png")
 const SCARE_RADIUS := 150.0
 ## 作物 -> 图集列（每株占 4 列：苗/小/大/成熟）
 const CROP_COL := {"parsnip": 0, "potato": 4, "straw": 8, "pumpkin": 12}
@@ -23,6 +25,8 @@ var tiles := {}
 var sprinklers := {}
 var scare_cells := {}
 var protectors: Array[Vector2] = []
+## 加工机：格子 -> {type: "mayo"/"jam", input: 原料id, ready: 完工产品id}
+var machines := {}
 var _target := Vector2i.ZERO
 var _target_valid := false
 var _preview := ""
@@ -66,6 +70,8 @@ func try_till(c: Vector2i) -> String:
 		return "洒水器占着这里"
 	if scare_cells.has(c):
 		return "稻草人立在这里"
+	if machines.has(c):
+		return "机器停在这里"
 	if tiles.has(c):
 		if tiles[c].crop != "":
 			return "作物还长在这里呢"
@@ -90,6 +96,8 @@ func try_plant(c: Vector2i, id: String) -> String:
 		return "洒水器占着这里"
 	if scare_cells.has(c):
 		return "稻草人立在这里"
+	if machines.has(c):
+		return "机器停在这里"
 	if not tiles.has(c):
 		return "先用锄头开垦这块地"
 	if tiles[c].crop != "":
@@ -119,6 +127,8 @@ func place_scarecrow(c: Vector2i) -> String:
 		return "洒水器占着这里"
 	if scare_cells.has(c):
 		return "这里已经有稻草人"
+	if machines.has(c):
+		return "机器停在这里"
 	if tiles.has(c) and tiles[c].crop != "":
 		return "先收获这里的作物"
 	scare_cells[c] = true
@@ -133,9 +143,26 @@ func place_sprinkler(c: Vector2i) -> String:
 		return "这里已经有洒水器"
 	if scare_cells.has(c):
 		return "稻草人立在这里"
+	if machines.has(c):
+		return "机器停在这里"
 	if tiles.has(c) and tiles[c].crop != "":
 		return "先收获这里的作物"
 	sprinklers[c] = true
+	queue_redraw()
+	return ""
+
+
+## 放置加工机（蛋黄酱机/食品加工机，占一格）
+func place_machine(c: Vector2i, type: String) -> String:
+	if machines.has(c):
+		return "这里已经有机器了"
+	if sprinklers.has(c):
+		return "洒水器占着这里"
+	if scare_cells.has(c):
+		return "稻草人立在这里"
+	if tiles.has(c) and tiles[c].crop != "":
+		return "先收获这里的作物"
+	machines[c] = {"type": type, "input": "", "ready": ""}
 	queue_redraw()
 	return ""
 
@@ -184,16 +211,24 @@ func on_new_day(raining := false) -> int:
 			if tiles.has(n) and tiles[n].crop != "":
 				tiles[n].watered = true
 				tiles[n].wtoday = true
+	for c in machines:  # 加工机过夜把原料变成产品
+		var m: Dictionary = machines[c]
+		if m.input != "" and m.ready == "":
+			var want: Dictionary = Game.MACHINE_INPUTS[m.type]
+			if want.has(m.input):
+				m.ready = want[m.input]
+				m.input = ""
 	queue_redraw()
 	return lost
 
 
-## 存档恢复：按 JSON 数据重建地块/洒水器/稻草人并重绘
+## 存档恢复：按 JSON 数据重建地块/洒水器/稻草人/加工机并重绘
 func restore_from(d: Dictionary) -> void:
 	tiles.clear()
 	sprinklers.clear()
 	scare_cells.clear()
 	protectors.clear()
+	machines.clear()
 	for row in d.get("tiles", []):
 		var c := Vector2i(int(row[0]), int(row[1]))
 		tiles[c] = {
@@ -209,6 +244,10 @@ func restore_from(d: Dictionary) -> void:
 		var sc := Vector2i(int(s[0]), int(s[1]))
 		scare_cells[sc] = true
 		protectors.append(Vector2(sc.x * CELL + 16, sc.y * CELL + 16))
+	for row2 in d.get("machines", []):
+		machines[Vector2i(int(row2[0]), int(row2[1]))] = {
+			"type": String(row2[2]), "input": String(row2[3]), "ready": String(row2[4]),
+		}
 	queue_redraw()
 
 
@@ -224,14 +263,32 @@ func _draw() -> void:
 			draw_texture_rect_region(TEX_CROPS, r, Rect2((col + idx) * CELL, 0, CELL, CELL))
 	for s in sprinklers:
 		draw_texture_rect(TEX_SPRINKLER, Rect2(s.x * CELL, s.y * CELL, CELL, CELL), false)
+	for c in machines:
+		var m: Dictionary = machines[c]
+		var tex := TEX_MACHINE_MAYO if m.type == "mayo" else TEX_MACHINE_JAM
+		var mh := 24.0 if m.type == "mayo" else 22.0
+		draw_texture_rect(tex, Rect2(c.x * CELL, c.y * CELL + CELL - mh, CELL, mh), false)
+		if m.ready != "":  # 完工标记：机器上方亮一颗金星
+			draw_rect(Rect2(c.x * CELL + 13, c.y * CELL - 12, 6, 6), Color(1, 0.9, 0.3))
+			draw_rect(Rect2(c.x * CELL + 13, c.y * CELL - 12, 6, 6), Color(0.5, 0.4, 0.1), false, 1.0)
+		elif m.input != "":  # 加工中标记：小蓝点
+			draw_rect(Rect2(c.x * CELL + 13, c.y * CELL - 12, 6, 6), Color(0.4, 0.7, 1))
 	for sc in scare_cells:
 		draw_texture_rect(TEX_SCARECROW, Rect2(sc.x * CELL, sc.y * CELL - 48, 32, 64), false)
 	if _preview_valid and _preview != "":
-		var pr := Rect2(_preview_cell.x * CELL, _preview_cell.y * CELL - 48, 32, 64) \
-				if _preview == "scarecrow" \
-				else Rect2(_preview_cell.x * CELL, _preview_cell.y * CELL, CELL, CELL)
-		var tex := TEX_SCARECROW if _preview == "scarecrow" else TEX_SPRINKLER
-		draw_texture_rect(tex, pr, false, Color(1, 1, 1, 0.55))
+		var pr: Rect2
+		var ptex: Texture2D
+		if _preview == "scarecrow":
+			pr = Rect2(_preview_cell.x * CELL, _preview_cell.y * CELL - 48, 32, 64)
+			ptex = TEX_SCARECROW
+		elif _preview == "sprinkler":
+			pr = Rect2(_preview_cell.x * CELL, _preview_cell.y * CELL, CELL, CELL)
+			ptex = TEX_SPRINKLER
+		else:  # 加工机预览
+			var pmh := 24.0 if _preview == "mayo" else 22.0
+			pr = Rect2(_preview_cell.x * CELL, _preview_cell.y * CELL + CELL - pmh, CELL, pmh)
+			ptex = TEX_MACHINE_MAYO if _preview == "mayo" else TEX_MACHINE_JAM
+		draw_texture_rect(ptex, pr, false, Color(1, 1, 1, 0.55))
 	if _target_valid:
 		var trect := Rect2(_target.x * CELL + 1, _target.y * CELL + 1, CELL - 2, CELL - 2)
 		draw_rect(trect, Color(1, 1, 1, 0.85), false, 2.0)

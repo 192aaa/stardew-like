@@ -20,12 +20,29 @@ const FISH := {
 	"trout": {"name": "虹鳟", "sell": 120, "w": 20, "night": true},
 }
 
-## 采集材料（鸡蛋算入可售物品）
+## 采集材料（鸡蛋算入可售物品；铜/铁/宝石为矿洞产物）
 const MATERIALS := {
 	"wood": {"name": "木材", "sell": 8},
 	"stone": {"name": "石料", "sell": 12},
 	"berry": {"name": "野莓", "sell": 25},
 	"egg": {"name": "鸡蛋", "sell": 60},
+	"copper": {"name": "铜矿", "sell": 40},
+	"iron": {"name": "铁矿", "sell": 90},
+	"gem": {"name": "宝石", "sell": 250},
+}
+
+## 加工产品（机器隔夜转化，售价比原料高）
+const PRODUCTS := {
+	"mayo": {"name": "蛋黄酱", "sell": 160},
+	"jam": {"name": "草莓酱", "sell": 300},
+	"pickle": {"name": "腌菜", "sell": 110},
+	"pie": {"name": "南瓜派", "sell": 700},
+}
+
+## 加工机收料表：原料 -> 产品（蛋黄酱机收鸡蛋；加工机收作物）
+const MACHINE_INPUTS := {
+	"mayo": {"egg": "mayo"},
+	"jam": {"straw": "jam", "pumpkin": "pie", "parsnip": "pickle"},
 }
 
 ## 制作配方
@@ -33,10 +50,19 @@ const RECIPES := {
 	"scarecrow": {"name": "稻草人", "cost": {"wood": 5}},
 	"sprinkler": {"name": "洒水器", "cost": {"stone": 4, "wood": 2}},
 	"fertilizer": {"name": "速效肥", "cost": {"wood": 2, "stone": 2}},
+	"mayo": {"name": "蛋黄酱机", "cost": {"wood": 6, "stone": 3}},
+	"jam": {"name": "食品加工机", "cost": {"wood": 8, "stone": 5}},
 }
 
 const HOE_UP_COST := 500
 const CAN_UP_COST := 500
+## 铁质升级：金币 + 铜矿，范围 5x5
+const HOE_UP2_COST := 2200
+const CAN_UP2_COST := 2200
+const IRON_ORE_COST := 5
+
+## 宠物：领养价（猫/狗各一只）
+const PET_COST := 500
 
 ## 技能系统：三类经验，每 XP_PER_LEVEL 点升 1 级，升级 max_stamina +10
 const XP_PER_LEVEL := 100
@@ -66,8 +92,12 @@ var gold := 500
 var day := 1
 var seeds := {"parsnip": 5, "potato": 0, "straw": 0, "pumpkin": 0}
 var harvest := {"parsnip": 0, "potato": 0, "straw": 0, "pumpkin": 0}
-## 背包：木材/石料/野莓/鱼
-var items := {"wood": 0, "stone": 0, "berry": 0, "smelt": 0, "perch": 0, "trout": 0}
+## 背包：木材/石料/野莓/鱼/矿石/加工产品
+var items := {
+	"wood": 0, "stone": 0, "berry": 0, "smelt": 0, "perch": 0, "trout": 0,
+	"copper": 0, "iron": 0, "gem": 0,
+	"mayo": 0, "jam": 0, "pickle": 0, "pie": 0,
+}
 
 ## 村民好感度（聊天涨，影响对话台词）
 var friends := {"rosa": 0, "ben": 0}
@@ -90,6 +120,10 @@ var chest_opened := 0
 var chicken_count := 0
 var eggs_ready := 0
 var total_eggs := 0
+
+## 宠物：已领养的宠物（"cat"/"dog"）与心情（0-100）
+var pets: Array = []
+var pet_mood := {"cat": 0, "dog": 0}
 
 ## 统计与成就
 var total_harvest := 0

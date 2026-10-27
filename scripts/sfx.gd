@@ -7,7 +7,7 @@ var _idx := 0
 
 
 func _ready() -> void:
-	for n in ["hoe", "water", "plant", "harvest", "coin", "bite", "pick", "axe"]:
+	for n in ["hoe", "water", "plant", "harvest", "coin", "bite", "pick", "axe", "talk"]:
 		_streams[n] = load("res://assets/s_%s.wav" % n)
 	for i in 8:
 		var p := AudioStreamPlayer.new()
