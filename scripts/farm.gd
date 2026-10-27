@@ -172,6 +172,30 @@ func on_new_day() -> int:
 	return lost
 
 
+## 存档恢复：按 JSON 数据重建地块/洒水器/稻草人并重绘
+func restore_from(d: Dictionary) -> void:
+	tiles.clear()
+	sprinklers.clear()
+	scare_cells.clear()
+	protectors.clear()
+	for row in d.get("tiles", []):
+		var c := Vector2i(int(row[0]), int(row[1]))
+		tiles[c] = {
+			"tilled": int(row[2]) == 1,
+			"watered": int(row[3]) == 1,
+			"crop": String(row[4]),
+			"stage": int(row[5]),
+			"wtoday": int(row[6]) == 1,
+		}
+	for s in d.get("sprinklers", []):
+		sprinklers[Vector2i(int(s[0]), int(s[1]))] = true
+	for s in d.get("scarecrows", []):
+		var sc := Vector2i(int(s[0]), int(s[1]))
+		scare_cells[sc] = true
+		protectors.append(Vector2(sc.x * CELL + 16, sc.y * CELL + 16))
+	queue_redraw()
+
+
 func _draw() -> void:
 	for c in tiles:
 		var t: Dictionary = tiles[c]

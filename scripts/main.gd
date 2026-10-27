@@ -87,8 +87,11 @@ func _ready() -> void:
 	add_child(_bobber)
 	_refresh_hud()
 	player.position = decor.DOOR_POS + Vector2(0, 44)
-	_toggle_help(true)
-	_toast("欢迎回来！锄地(1) 浇水(2) 种地，5 鱼竿 6 斧镐，C 制作，H 帮助")
+	if _do_load(false):
+		_toast("已读取第 %d 天存档 · F5 存档 / F9 读档 · 按 H 看帮助" % Game.day)
+	else:
+		_toggle_help(true)
+		_toast("欢迎回来！锄地(1) 浇水(2) 种地，5 鱼竿 6 斧镐，C 制作，H 帮助")
 
 
 func _process(delta: float) -> void:
@@ -128,6 +131,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_craft(not craft_open)
 	elif event.is_action_pressed("help"):
 		_toggle_help(not help_open)
+	elif event.is_action_pressed("save_game"):
+		if not sleeping:
+			_do_save()
+	elif event.is_action_pressed("load_game"):
+		if not sleeping:
+			_do_load()
 	elif event.is_action_pressed("use"):
 		if help_open:
 			_toggle_help(false)
@@ -434,6 +443,102 @@ func _end_fishing() -> void:
 		player.set_physics_process(true)
 
 
+# ---------- 存档与读档 ----------
+
+## 组装进度：Game 全局 + 时间/工具 + 玩家位置 + 农田地块与放置物
+func _save_payload() -> Dictionary:
+	var tiles: Array = []
+	for c in farm.tiles:
+		var t: Dictionary = farm.tiles[c]
+		tiles.append([c.x, c.y, int(t.tilled), int(t.watered), t.crop, int(t.stage), int(t.wtoday)])
+	var sprink: Array = []
+	for c in farm.sprinklers:
+		sprink.append([c.x, c.y])
+	var scare: Array = []
+	for c in farm.scare_cells:
+		scare.append([c.x, c.y])
+	return {
+		"day": Game.day, "gold": Game.gold,
+		"seeds": Game.seeds, "harvest": Game.harvest, "items": Game.items,
+		"stamina": Game.stamina, "max_stamina": Game.max_stamina,
+		"hoe_level": Game.hoe_level, "can_level": Game.can_level,
+		"time_min": time_min, "tool": current_tool,
+		"px": player.position.x, "py": player.position.y,
+		"tiles": tiles, "sprinklers": sprink, "scarecrows": scare,
+	}
+
+
+func _apply_payload(d: Dictionary) -> void:
+	Game.day = int(d.get("day", 1))
+	Game.gold = int(d.get("gold", 500))
+	var seeds: Dictionary = d.get("seeds", {})
+	for k in Game.seeds:
+		if seeds.has(k):
+			Game.seeds[k] = int(seeds[k])
+	var harvest_d: Dictionary = d.get("harvest", {})
+	for k in Game.harvest:
+		if harvest_d.has(k):
+			Game.harvest[k] = int(harvest_d[k])
+	var items_d: Dictionary = d.get("items", {})
+	for k in Game.items:
+		if items_d.has(k):
+			Game.items[k] = int(items_d[k])
+	Game.stamina = float(d.get("stamina", 100.0))
+	Game.max_stamina = float(d.get("max_stamina", 100.0))
+	Game.hoe_level = int(d.get("hoe_level", 1))
+	Game.can_level = int(d.get("can_level", 1))
+	time_min = clampf(float(d.get("time_min", DAY_START_MIN)), DAY_START_MIN, DAY_END_MIN - 1.0)
+	current_tool = clampi(int(d.get("tool", 0)), 0, 5)
+	player.position = Vector2(
+		float(d.get("px", decor.DOOR_POS.x)),
+		float(d.get("py", decor.DOOR_POS.y + 44.0)))
+	farm.restore_from(d)
+	Game.state_changed.emit()
+
+
+## 睡觉醒来时自动存档；返回是否成功
+func _autosave() -> bool:
+	return Save.write(JSON.stringify(_save_payload()))
+
+
+func _do_save() -> void:
+	if _autosave():
+		Sfx.play("pick")
+		_toast("已存档（第 %d 天 %s）" % [Game.day, _clock_text()])
+	else:
+		_toast("存档失败了……")
+
+
+## 读档；返回是否成功。开局静默调用（with_toast=false）
+func _do_load(with_toast := true) -> bool:
+	var text := Save.read()
+	if text == "":
+		if with_toast:
+			_toast("还没有存档，睡觉或按 F5 就会存档")
+		return false
+	var parsed: Variant = JSON.parse_string(text)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		if with_toast:
+			_toast("存档数据损坏了")
+		return false
+	_apply_payload(parsed)
+	# 清理残留的界面与钓鱼状态
+	if shop_open:
+		_toggle_shop(false)
+	if craft_open:
+		_toggle_craft(false)
+	if help_open:
+		_toggle_help(false)
+	if fish_state > 0:
+		_end_fishing()
+	place_mode = ""
+	farm.set_preview("", Vector2i.ZERO, false)
+	if with_toast:
+		Sfx.play("pick")
+		_toast("已读取第 %d 天存档" % Game.day)
+	return true
+
+
 # ---------- 昼夜与睡觉 ----------
 
 func _do_sleep(passed_out: bool) -> void:
@@ -461,17 +566,19 @@ func _do_sleep(passed_out: bool) -> void:
 	Game.stamina = Game.max_stamina
 	Game.state_changed.emit()
 	player.position = decor.DOOR_POS + Vector2(0, 46)
+	var save_ok := _autosave()
+	var tail := " · 已自动存档" if save_ok else ""
 	var tw2 := create_tween()
 	tw2.tween_property(fade, "color:a", 0.0, 0.7)
 	await tw2.finished
 	player.set_physics_process(true)
 	sleeping = false
 	if lost > 0:
-		_toast("乌鸦夜里偷吃了 %d 株作物！快做个稻草人（C）" % lost)
+		_toast("乌鸦夜里偷吃了 %d 株作物！快做个稻草人（C）%s" % [lost, tail])
 	elif passed_out:
-		_toast("你累倒了……醒来已是第 %d 天" % Game.day)
+		_toast("你累倒了……醒来已是第 %d 天%s" % [Game.day, tail])
 	else:
-		_toast("睡了个好觉！第 %d 天，体力已回满" % Game.day)
+		_toast("睡了个好觉！第 %d 天，体力已回满%s" % [Game.day, tail])
 
 
 func _sky_color(t: float) -> Color:
@@ -746,7 +853,7 @@ func _build_help() -> void:
 	vb.add_child(title)
 	_help_section(vb, "基础操作", [
 		"WASD / 方向键 移动　　空格 / 鼠标左键 使用工具　　E 互动",
-		"1-6 切换工具　　C 制作　　H 打开本说明　　Esc 关闭面板",
+		"1-6 切换工具　　C 制作　　H 帮助　　Esc 关闭　　F5 存档 / F9 读档",
 	])
 	_help_section(vb, "种田流程", [
 		"1 锄头开垦 → 3/4 播种 → 2 浇水 → 每天浇水才生长 → 成熟后空格收获",
@@ -763,7 +870,7 @@ func _build_help() -> void:
 		"制作后移动到目标格子按空格放置，Esc 取消",
 	])
 	_help_section(vb, "体力与昼夜", [
-		"动作消耗体力（左下角），不足则无法干活；家门口按 E 睡觉回满并进入次日",
+		"动作消耗体力（左下角），不足则无法干活；家门口按 E 睡觉回满并进入次日，自动存档",
 		"6:00 开始新一天，熬到 24:00 会累倒，作物生长都靠每天浇水",
 	])
 	var close_l := _mk_label("按 H / E / Esc 关闭", 13)
