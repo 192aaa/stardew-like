@@ -1,0 +1,10 @@
+# Godot
+.godot/
+*.translation
+
+# Builds
+build/
+
+# System
+*.tmp
+Thumbs.db

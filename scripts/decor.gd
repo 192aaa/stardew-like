@@ -1,0 +1,251 @@
+extends Node2D
+## 场景装饰：房屋/商店/树木/栅栏/小路/花与荷叶，全部基于像素贴图，并负责碰撞
+## 附加：水面动画、夜晚灯光与萤火虫、烟囱炊烟、草丛石子散布
+
+const FARM := preload("res://scripts/farm.gd")
+
+const TEX_HOUSE := preload("res://assets/house.png")
+const TEX_STALL := preload("res://assets/stall.png")
+const TEX_TREE := preload("res://assets/tree.png")
+const TEX_PINE := preload("res://assets/tree2.png")
+const TEX_POST := preload("res://assets/fence_post.png")
+const TEX_RAIL := preload("res://assets/fence_rail.png")
+const TEX_FLOWERS := preload("res://assets/flowers.png")
+const TEX_LILY := preload("res://assets/lily.png")
+const TEX_STONE := preload("res://assets/stone.png")
+const TEX_TUFT := preload("res://assets/tuft.png")
+const TEX_SHADOW := preload("res://assets/shadow.png")
+const TEX_SIGN := preload("res://assets/sign.png")
+const TEX_LAMP := preload("res://assets/lamp.png")
+const TEX_GLOW := preload("res://assets/glow.png")
+const TEX_GLOW_S := preload("res://assets/glow_small.png")
+const TEX_POND_EDGE := preload("res://assets/pond_edge.png")
+
+const WATER_FRAMES := [
+	preload("res://assets/water0.png"), preload("res://assets/water1.png"),
+	preload("res://assets/water2.png"), preload("res://assets/water3.png"),
+]
+
+const HOUSE_RECT := Rect2(-780, -580, 240, 170)
+const DOOR_POS := Vector2(-660, -410)
+const STALL_RECT := Rect2(560, -450, 220, 120)
+const SHOP_POS := Vector2(670, -330)
+const POND_RECT := Rect2(560, -60, 240, 160)
+const LAMP_POS := Vector2(524, -374)
+
+const TREES := [
+	Vector2(-1050, -780), Vector2(-900, -350), Vector2(-1000, 400),
+	Vector2(-350, 700), Vector2(60, -800), Vector2(450, -750),
+	Vector2(1050, -750), Vector2(1150, -50), Vector2(900, 350),
+	Vector2(300, 600), Vector2(-1000, 850), Vector2(1200, 800),
+	Vector2(480, -520), Vector2(880, -520),
+]
+
+const FLOWER_POS := [
+	Vector2(-500, -500), Vector2(-260, -450), Vector2(120, -420),
+	Vector2(650, -250), Vector2(900, 150), Vector2(-150, -80),
+	Vector2(-80, 120), Vector2(420, 80), Vector2(700, 300),
+	Vector2(900, 550), Vector2(-700, 100), Vector2(-950, -100),
+	Vector2(-400, 500), Vector2(200, 500),
+]
+
+const LILY_POS := [Vector2(630, -10), Vector2(710, 40), Vector2(755, -25)]
+
+const FIREFLY_BASE := [
+	Vector2(600, 20), Vector2(690, 90), Vector2(750, -30), Vector2(500, 70),
+	Vector2(860, 40), Vector2(620, 140), Vector2(770, 120), Vector2(470, -30),
+]
+
+var sign_font: SystemFont
+var _stones: Array[Vector2] = []
+var _wt := 0.0
+var _glow_window: Sprite2D
+var _glow_lamp: Sprite2D
+var _fireflies: Array[Sprite2D] = []
+
+
+func _ready() -> void:
+	sign_font = SystemFont.new()
+	sign_font.font_names = PackedStringArray(["Microsoft YaHei", "SimHei", "SimSun"])
+	# 小路的石板（固定随机种子，保证每次一致）
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for i in 12:
+		var t := i / 11.0
+		_stones.append(Vector2(-660, -395).lerp(Vector2(-390, -230), t)
+				+ Vector2(rng.randf_range(-7, 7), rng.randf_range(-6, 6)))
+	# 树木与投影（橡树 / 松树交替）
+	for i in TREES.size():
+		var p: Vector2 = TREES[i]
+		_add_sprite(TEX_SHADOW, p + Vector2(0, 26))
+		_add_sprite(TEX_PINE if i % 2 == 1 else TEX_TREE, p + Vector2(0, -14))
+	# 野花（图集 4 种花色）
+	for i in FLOWER_POS.size():
+		_add_sprite(TEX_FLOWERS, FLOWER_POS[i], Rect2((i % 4) * 16, 0, 16, 16))
+	# 荷叶与池塘沙边
+	for p in LILY_POS:
+		_add_sprite(TEX_LILY, p)
+	_add_sprite(TEX_POND_EDGE, POND_RECT.get_center())
+	# 草丛与石子散布（避开农田/池塘/建筑）
+	_scatter_detail()
+	# 夜景：路灯、窗户灯光、萤火虫、炊烟
+	_add_sprite(TEX_LAMP, LAMP_POS)
+	_glow_lamp = _add_glow(LAMP_POS + Vector2(0, -12), 1.4)
+	_glow_window = _add_glow(Vector2(-722, -468), 2.0)
+	for b in FIREFLY_BASE:
+		var f := _add_sprite(TEX_GLOW_S, b)
+		f.material = _add_material()
+		f.modulate.a = 0.0
+		_fireflies.append(f)
+	_setup_smoke()
+	# 碰撞：房屋、商店、池塘、灯柱、树干、地图边界
+	_add_blocker_rect(HOUSE_RECT)
+	_add_blocker_rect(STALL_RECT)
+	_add_blocker_rect(POND_RECT)
+	_add_blocker_circle(LAMP_POS, 6.0)
+	for p in TREES:
+		_add_blocker_circle(p + Vector2(0, 16), 12.0)
+	_add_blocker_rect(Rect2(-1560, -1060, 3120, 60))
+	_add_blocker_rect(Rect2(-1560, 1000, 3120, 60))
+	_add_blocker_rect(Rect2(-1560, -1000, 60, 2060))
+	_add_blocker_rect(Rect2(1500, -1000, 60, 2060))
+
+
+func _process(delta: float) -> void:
+	_wt += delta
+	# 水面波光动画
+	var pond := get_node_or_null("../Pond")
+	if pond:
+		pond.texture = WATER_FRAMES[int(_wt / 0.45) % 4]
+	# 夜晚因子（从环境色调亮度推算）→ 灯光与萤火虫
+	var lum: float = get_node("../CanvasModulate").color.get_luminance()
+	var night := clampf((0.75 - lum) / 0.4, 0.0, 1.0)
+	_glow_window.modulate.a = night * 0.9
+	_glow_lamp.modulate.a = night * 0.9
+	for i in _fireflies.size():
+		var f := _fireflies[i]
+		var b: Vector2 = FIREFLY_BASE[i]
+		f.position = b + Vector2(sin(_wt * 0.7 + i * 1.9) * 26.0, cos(_wt * 0.53 + i * 1.3) * 18.0)
+		f.modulate.a = night * (0.35 + 0.4 * (0.5 + 0.5 * sin(_wt * 2.2 + i)))
+
+
+func _scatter_detail() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 99
+	var placed := 0
+	while placed < 30:
+		var p := Vector2(rng.randf_range(-1400, 1400), rng.randf_range(-900, 900))
+		var blocked := false
+		for z in FARM.ZONES:
+			if z.grow(8).has_point(p):
+				blocked = true
+		if POND_RECT.grow(26).has_point(p) or HOUSE_RECT.grow(20).has_point(p) \
+				or STALL_RECT.grow(30).has_point(p) or p.distance_to(DOOR_POS) < 60:
+			blocked = true
+		if not blocked:
+			var tex := TEX_TUFT if rng.randf() < 0.72 else TEX_STONE
+			_add_sprite(tex, p)
+			placed += 1
+
+
+func _add_material() -> CanvasItemMaterial:
+	var m := CanvasItemMaterial.new()
+	m.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+	return m
+
+
+func _add_glow(pos: Vector2, scale_f: float) -> Sprite2D:
+	var s := Sprite2D.new()
+	s.texture = TEX_GLOW
+	s.position = pos
+	s.scale = Vector2(scale_f, scale_f)
+	s.material = _add_material()
+	s.modulate.a = 0.0
+	add_child(s)
+	return s
+
+
+func _setup_smoke() -> void:
+	var smoke := CPUParticles2D.new()
+	smoke.position = Vector2(-590, -560)
+	smoke.amount = 5
+	smoke.lifetime = 2.4
+	smoke.texture = TEX_GLOW_S
+	smoke.direction = Vector2(0, -1)
+	smoke.spread = 14.0
+	smoke.gravity = Vector2(0, -16)
+	smoke.initial_velocity_min = 7.0
+	smoke.initial_velocity_max = 13.0
+	smoke.scale_amount_min = 0.7
+	smoke.scale_amount_max = 1.7
+	smoke.color = Color(0.88, 0.88, 0.86, 0.16)
+	smoke.emitting = true
+	add_child(smoke)
+
+
+func _add_sprite(tex: Texture2D, pos: Vector2, region := Rect2()) -> Sprite2D:
+	var s := Sprite2D.new()
+	s.texture = tex
+	s.position = pos
+	if region.size.x > 0:
+		s.region_enabled = true
+		s.region_rect = region
+	add_child(s)
+	return s
+
+
+func _add_blocker_rect(r: Rect2) -> void:
+	var body := StaticBody2D.new()
+	var cs := CollisionShape2D.new()
+	var shape := RectangleShape2D.new()
+	shape.size = r.size
+	cs.shape = shape
+	body.position = r.get_center()
+	body.add_child(cs)
+	add_child(body)
+
+
+func _add_blocker_circle(pos: Vector2, radius: float) -> void:
+	var body := StaticBody2D.new()
+	var cs := CollisionShape2D.new()
+	var shape := CircleShape2D.new()
+	shape.radius = radius
+	cs.shape = shape
+	body.position = pos
+	body.add_child(cs)
+	add_child(body)
+
+
+func _draw() -> void:
+	for z in FARM.ZONES:
+		_draw_fence(z)
+	_draw_path()
+	draw_texture_rect(TEX_HOUSE, Rect2(-784, -594, 248, 184), false)
+	draw_texture_rect(TEX_STALL, Rect2(STALL_RECT.position, STALL_RECT.size), false)
+	# 商店招牌
+	var sign_rect := Rect2(STALL_RECT.get_center().x - 90, STALL_RECT.position.y - 68, 180, 26)
+	draw_texture_rect(TEX_SIGN, sign_rect, false)
+	draw_string_outline(sign_font, Vector2(sign_rect.position.x, sign_rect.position.y + 19),
+			"皮埃尔种子商店", HORIZONTAL_ALIGNMENT_CENTER, sign_rect.size.x, 16, 4, Color(0.1, 0.07, 0.05))
+	draw_string(sign_font, Vector2(sign_rect.position.x, sign_rect.position.y + 19),
+			"皮埃尔种子商店", HORIZONTAL_ALIGNMENT_CENTER, sign_rect.size.x, 16, Color(0.24, 0.16, 0.1))
+
+
+func _draw_fence(r: Rect2) -> void:
+	draw_texture_rect(TEX_RAIL, Rect2(r.position.x, r.position.y + 2, r.size.x, 8), false)
+	draw_texture_rect(TEX_RAIL, Rect2(r.position.x, r.end.y - 4, r.size.x, 8), false)
+	var x := r.position.x
+	while x <= r.end.x:
+		draw_texture_rect(TEX_POST, Rect2(x - 6, r.position.y - 8, 12, 28), false)
+		draw_texture_rect(TEX_POST, Rect2(x - 6, r.end.y - 20, 12, 28), false)
+		x += 32.0
+	var y := r.position.y + 32.0
+	while y < r.end.y:
+		draw_texture_rect(TEX_POST, Rect2(r.position.x - 6, y - 8, 12, 28), false)
+		draw_texture_rect(TEX_POST, Rect2(r.end.x - 6, y - 8, 12, 28), false)
+		y += 32.0
+
+
+func _draw_path() -> void:
+	for s in _stones:
+		draw_texture_rect(TEX_STONE, Rect2(s.x - 8, s.y - 5, 16, 10), false)
