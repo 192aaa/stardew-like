@@ -26,7 +26,7 @@ const FISH := {
 	"legend": {"name": "鱼王·金鳞鲤", "sell": 1200, "w": 2, "legend": true},
 }
 
-## 采集材料（鸡蛋算入可售物品；铜/铁/宝石为矿洞产物）
+## 采集材料（鸡蛋算入可售物品；铜/铁/宝石为矿洞产物，锭为熔炉产物，奶/毛为畜棚产出）
 const MATERIALS := {
 	"wood": {"name": "木材", "sell": 8},
 	"stone": {"name": "石料", "sell": 12},
@@ -35,6 +35,10 @@ const MATERIALS := {
 	"copper": {"name": "铜矿", "sell": 40},
 	"iron": {"name": "铁矿", "sell": 90},
 	"gem": {"name": "宝石", "sell": 250},
+	"copper_bar": {"name": "铜锭", "sell": 150},
+	"iron_bar": {"name": "铁锭", "sell": 320},
+	"milk": {"name": "牛奶", "sell": 240},
+	"wool": {"name": "羊毛", "sell": 340},
 }
 
 ## 加工产品（机器隔夜转化，售价比原料高）
@@ -43,6 +47,7 @@ const PRODUCTS := {
 	"jam": {"name": "草莓酱", "sell": 300},
 	"pickle": {"name": "腌菜", "sell": 110},
 	"pie": {"name": "南瓜派", "sell": 700},
+	"cheese": {"name": "奶酪", "sell": 550},
 }
 
 ## 料理（灶台现做）：energy = 吃下回复的体力，sell = 售价
@@ -52,10 +57,13 @@ const DISHES := {
 	"dessert": {"name": "草莓甜点", "sell": 260, "energy": 90, "cost": {"straw": 2, "egg": 1}},
 }
 
-## 加工机收料表：原料 -> 产品（蛋黄酱机收鸡蛋；加工机收作物）
+## 加工机收料表：原料 -> 产品（蛋黄酱机收鸡蛋；加工机收作物；
+## 熔炉收矿石铸锭；奶酪机收牛奶）
 const MACHINE_INPUTS := {
 	"mayo": {"egg": "mayo"},
 	"jam": {"straw": "jam", "pumpkin": "pie", "parsnip": "pickle"},
+	"furnace": {"copper": "copper_bar", "iron": "iron_bar"},
+	"cheese": {"milk": "cheese"},
 }
 
 ## 制作配方
@@ -66,6 +74,9 @@ const RECIPES := {
 	"mayo": {"name": "蛋黄酱机", "cost": {"wood": 6, "stone": 3}},
 	"jam": {"name": "食品加工机", "cost": {"wood": 8, "stone": 5}},
 	"stove": {"name": "灶台", "cost": {"stone": 6, "wood": 4}},
+	"furnace": {"name": "熔炉", "cost": {"stone": 8, "wood": 2}},
+	"cheese": {"name": "奶酪机", "cost": {"wood": 8, "stone": 6}},
+	"sprinkler2": {"name": "高级洒水器", "cost": {"iron_bar": 1, "stone": 4}},
 }
 
 const HOE_UP_COST := 500
@@ -74,6 +85,13 @@ const CAN_UP_COST := 500
 const HOE_UP2_COST := 2200
 const CAN_UP2_COST := 2200
 const IRON_ORE_COST := 5
+## 金质升级：金币 + 铁锭，范围 7x7
+const HOE_UP3_COST := 5000
+const CAN_UP3_COST := 5000
+const GOLD_BAR_COST := 3
+## 钓竿升级：金币 + 铜矿；收线更稳，稀有鱼权重翻倍
+const ROD_UP_COST := 1800
+const ROD_UP_ORE := 5
 
 ## 宠物：领养价（猫/狗各一只）
 const PET_COST := 500
@@ -86,6 +104,12 @@ const SKILL_NAMES := {"farm": "务农", "fish": "钓鱼", "gather": "采集"}
 ## 家禽养殖
 const CHICKEN_COST := 800
 const MAX_CHICKENS := 4
+
+## 牛羊牧场（畜棚在西侧，过夜产出牛奶/羊毛）
+const COW_COST := 2500
+const SHEEP_COST := 2000
+const MAX_COWS := 2
+const MAX_SHEEP := 2
 
 ## 成就图鉴（check_achievements 里逐条校验）
 const ACHIEVEMENTS := {
@@ -103,6 +127,8 @@ const ACHIEVEMENTS := {
 	"order_10": {"name": "供货明星", "desc": "完成 10 张订单"},
 	"friend_70": {"name": "知心好友", "desc": "与任一村民好感度达到 70"},
 	"day_10": {"name": "扎下根来", "desc": "在农场度过第 10 天"},
+	"metal_10": {"name": "冶炼师傅", "desc": "累计熔炼 10 块金属锭"},
+	"cheese_1": {"name": "奶香四溢", "desc": "做出第一块奶酪"},
 }
 
 ## 送礼好感里程碑：达到对应好感首次回赠（金币/种子/宝石/金币）
@@ -114,11 +140,12 @@ var gold := 500
 var day := 1
 var seeds := {"parsnip": 5, "potato": 0, "straw": 0, "pumpkin": 0, "corn": 0, "blue": 0}
 var harvest := {"parsnip": 0, "potato": 0, "straw": 0, "pumpkin": 0, "corn": 0, "blue": 0}
-## 背包：木材/石料/野莓/鱼/矿石/加工产品/料理
+## 背包：木材/石料/野莓/鱼/矿石/金属锭/奶毛/加工产品/料理
 var items := {
 	"wood": 0, "stone": 0, "berry": 0, "smelt": 0, "perch": 0, "trout": 0,
 	"copper": 0, "iron": 0, "gem": 0,
-	"mayo": 0, "jam": 0, "pickle": 0, "pie": 0,
+	"copper_bar": 0, "iron_bar": 0, "milk": 0, "wool": 0,
+	"mayo": 0, "jam": 0, "pickle": 0, "pie": 0, "cheese": 0,
 	"salad": 0, "soup": 0, "dessert": 0,
 }
 
@@ -143,6 +170,17 @@ var chest_opened := 0
 var chicken_count := 0
 var eggs_ready := 0
 var total_eggs := 0
+
+## 牛羊牧场：数量、待收产出与累计统计
+var cow_count := 0
+var sheep_count := 0
+var milk_ready := 0
+var wool_ready := 0
+var total_milk := 0
+var total_wool := 0
+var total_bars := 0    # 累计熔炼金属锭数
+var total_cheese := 0  # 累计做出奶酪数
+var rod_lv := 1        # 鱼竿等级（2 = 铜钓竿）
 
 ## 宠物：已领养的宠物（"cat"/"dog"）与心情（0-100）
 var pets: Array = []
@@ -272,4 +310,8 @@ func _ach_ok(id: String) -> bool:
 			return total_cooked >= 1
 		"gift_5":
 			return gift_count >= 5
+		"metal_10":
+			return total_bars >= 10
+		"cheese_1":
+			return total_cheese >= 1
 	return false

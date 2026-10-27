@@ -1401,6 +1401,29 @@ def fish_icon():
     return upscale(outline(img, (40, 70, 96, 255)))
 
 
+def fish_gold():
+    """鱼王战斗界面的金色鱼（与 fish_icon 同形，换金色）"""
+    img = grid([
+        "................",
+        "................",
+        "................",
+        "....ffffff......",
+        "..ffffffffff.f..",
+        ".fffefffffffff..",
+        ".fffffffffffff..",
+        ".ffwwwwffffff.f.",
+        "..ffwwffffff.f..",
+        "....ffffff......",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+    ], {"f": (240, 192, 72), "w": (252, 236, 170), "e": (92, 66, 20)})
+    return upscale(outline(img, (128, 94, 24, 255)))
+
+
 def bobber():
     """鱼漂 8x8"""
     img = grid([
@@ -1879,6 +1902,201 @@ def bunting():
     return upscale(outline(img, (60, 46, 32, 255)))
 
 
+def _pad(rows, w):
+    """右侧补齐透明像素，省得逐行数字符"""
+    out = []
+    for r in rows:
+        assert len(r) <= w, "行超宽: %d > %d [%s]" % (len(r), w, r)
+        out.append(r + "." * (w - len(r)))
+    return out
+
+
+def furnace():
+    """熔炉：石砌炉身 + 侧面烟囱 + 橙红炉口（熔炼金属锭）"""
+    img = grid(_pad([
+        ".ppp",
+        ".pXp",
+        ".ppp",
+        "...oooooooooo",
+        "..okkKKkkkKKko",
+        "..okkkkkkkkkko",
+        "..okkkkkkkkkko",
+        "..okfFFFFfkkko",
+        "..okfFFFFfkkko",
+        "..okffFFffkkko",
+        "..okkfFFfkkkko",
+        "..okkkkkkkkkko",
+        "..okkKKkkkKKko",
+        "...oooooooooo",
+    ], 16), {
+        "o": (40, 30, 24), "p": (122, 118, 128), "X": (64, 60, 72),
+        "k": (108, 100, 108), "K": (146, 138, 144),
+        "f": (226, 108, 40), "F": (248, 186, 80),
+    })
+    return upscale(outline(img, (36, 26, 20, 255)))
+
+
+def machine_cheese():
+    """奶酪机：木桶压酪器（顶部压杆 + 桶身 + 奶酪黄）"""
+    img = grid([
+        "......opppo.....",
+        "......o.p.o.....",
+        "...oooooooooo...",
+        "..oBBBBBBBBBBo..",
+        "..obBBBBBBBBbo..",
+        "..obBBBBBBBBbo..",
+        "..obyBBBBBybo...",
+        "..obyyBByybbo...",
+        "..obbbbbbbbbo...",
+        "..oBBBBBBBBBBo..",
+        "..obbbbbbbbbo...",
+        "...oooooooooo...",
+    ], {
+        "o": (50, 38, 28), "p": (122, 120, 130),
+        "B": (198, 154, 104), "b": (170, 128, 84), "y": (242, 200, 92),
+    })
+    return upscale(outline(img, (40, 30, 22, 255)))
+
+
+def barn():
+    """畜棚：宽木棚 + 红棕屋顶 + 大门洞 + 干草垛"""
+    w, h = 44, 38
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    # 墙（暖白木板）
+    d.rectangle((3, 18, 40, 35), fill=(214, 192, 156, 255))
+    for y in range(22, 35, 5):
+        d.line((3, y, 40, y), fill=(188, 166, 130, 255))
+    # 屋顶（红棕梯形）
+    d.polygon([(0, 20), (10, 4), (33, 4), (43, 20)], fill=(150, 74, 56, 255))
+    for y in range(6, 20, 4):
+        inset = (y - 4) * 21 // 16
+        d.line((max(10 - inset, 0), y, min(33 + inset, 43), y),
+               fill=(122, 58, 46, 255))
+    d.line((0, 20, 43, 20), fill=(96, 46, 38, 255))
+    # 大门洞
+    d.rectangle((14, 24, 29, 35), fill=(84, 56, 36, 255))
+    d.rectangle((16, 26, 27, 35), fill=(106, 72, 46, 255))
+    d.line((21, 26, 21, 35), fill=(84, 56, 36, 255))
+    # 干草垛
+    d.rectangle((5, 28, 11, 35), fill=(226, 186, 92, 255))
+    for y in range(30, 35, 3):
+        d.line((5, y, 11, y), fill=(198, 158, 70, 255))
+    # 小窗
+    d.rectangle((33, 24, 38, 29), fill=(240, 214, 130, 255))
+    return upscale(outline(img, (52, 40, 32, 255)))
+
+
+def _quadruped(top, legs_a, legs_b, pal, w=20, fh=15):
+    """四足动物精灵表：上身为 13 行，两组腿部姿势各 2 行，横排图集"""
+    atlas = Image.new("RGBA", (w * 2, fh), (0, 0, 0, 0))
+    atlas.paste(outline(grid(_pad(top + legs_a, w), pal), (48, 38, 30, 255)), (0, 0))
+    atlas.paste(outline(grid(_pad(top + legs_b, w), pal), (48, 38, 30, 255)), (w, 0))
+    return upscale(atlas)
+
+
+def cow_sheet():
+    """奶牛两帧（站立 / 迈步），侧面朝右，白底黑斑 + 粉色乳房"""
+    pal = {
+        "o": (54, 42, 32), "w": (240, 236, 226), "W": (216, 210, 198),
+        "k": (64, 60, 66), "e": (40, 36, 30), "p": (238, 168, 176),
+    }
+    top = [
+        "......ooooo",
+        ".....okkkkkoo",
+        ".....okwwwwwko",
+        ".....owewwwwko",
+        ".....owwwwkppoo",
+        "......oowwwkppo",
+        "....oowwwwoo",
+        "...owkwwwwwwwo",
+        "..owwwwwwwwwwwwo",
+        "..owkwwwwwwkwwwo",
+        "..owwwwwwwwwwwwo",
+        "..oWwwwwwwwwwwWo",
+        "...owwpwwwwpwo",
+    ]
+    la = ["...oo....oo", "...oo....oo"]
+    lb = ["..oo......oo", ".oo........oo"]
+    return _quadruped(top, la, lb, pal)
+
+
+def sheep_sheet():
+    """绵羊两帧（站立 / 迈步），侧面朝右，蓬松羊毛 + 灰脸"""
+    pal = {
+        "o": (54, 42, 32), "f": (246, 244, 238), "F": (220, 216, 206),
+        "k": (110, 102, 98), "e": (40, 36, 30),
+    }
+    top = [
+        "......offfffo",
+        "....offffffffffo",
+        "...offfffffffffo",
+        "...offffffffffko",
+        "...offffffffffkeko",
+        "....oofffffffokko",
+        "...offffffffoo",
+        "..offfffffffffo",
+        ".offffffffffffffo",
+        ".oFffffffffffffFo",
+        ".oFffffffffffffFo",
+        "..offffffffffffo",
+        "...offfffffffo",
+    ]
+    la = ["...oo....oo", "...oo....oo"]
+    lb = ["..oo......oo", ".oo........oo"]
+    return _quadruped(top, la, lb, pal, w=19)
+
+
+def sprinkler2():
+    """高级洒水器：金色喷头 + 底座（清晨浇灌 3x3）"""
+    img = grid([
+        "................",
+        "......ssss......",
+        "......sggs......",
+        "......sggs......",
+        "...ssssssssss...",
+        "...sggssssggs...",
+        "...ssssssssss...",
+        ".....ssssss.....",
+        "....ssssssss....",
+        "....sggggggs....",
+        "....ssssssss....",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+    ], {"s": (222, 184, 80), "g": (158, 122, 44)})
+    return upscale(outline(img, (100, 78, 30, 255)))
+
+
+def milk():
+    """一瓶牛奶"""
+    img = grid([
+        "..oo...",
+        ".oppo..",
+        ".owwo..",
+        "owwWWwo",
+        "owwWWwo",
+        "oWwwwWo",
+        ".ooooo.",
+    ], {"o": (120, 130, 150), "p": (188, 196, 214), "w": (248, 248, 244), "W": (226, 230, 240)})
+    return upscale(outline(img, (86, 94, 116, 255)))
+
+
+def wool():
+    """一团蓬松羊毛"""
+    img = grid([
+        ".ffff.",
+        "ffFfff",
+        "ffffFf",
+        "fFffff",
+        ".ffff.",
+        "..ff..",
+    ], {"f": (246, 244, 238), "F": (218, 214, 204)})
+    return upscale(outline(img, (150, 146, 138, 255)))
+
+
 # ---------------- 8-bit 音效（wave 模块合成） ----------------
 import math
 import struct
@@ -2182,6 +2400,7 @@ def main():
     save(scarecrow(), "scarecrow.png")
     save(sprinkler(), "sprinkler.png")
     save(fish_icon(), "fish.png")
+    save(fish_gold(), "fish_gold.png")
     save(bobber(), "bobber.png")
     save(well(), "well.png")
     save(mailbox(), "mailbox.png")
@@ -2210,6 +2429,14 @@ def main():
     save(pet_sheet(CAT_BODY, CAT_LEGS_A, CAT_LEGS_B, CAT_PAL), "pet_cat.png")
     save(pet_sheet(DOG_BODY, DOG_LEGS_A, DOG_LEGS_B, DOG_PAL), "pet_dog.png")
     save(bunting(), "bunting.png")
+    save(furnace(), "furnace.png")
+    save(machine_cheese(), "machine_cheese.png")
+    save(barn(), "barn.png")
+    save(cow_sheet(), "cow.png")
+    save(sheep_sheet(), "sheep.png")
+    save(sprinkler2(), "sprinkler2.png")
+    save(milk(), "milk.png")
+    save(wool(), "wool.png")
     for fn in (sfx_hoe, sfx_water, sfx_plant, sfx_harvest, sfx_coin, sfx_bite, sfx_pick, sfx_axe,
                sfx_talk, sfx_rain):
         fn()

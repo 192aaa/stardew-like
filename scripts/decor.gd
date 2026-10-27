@@ -30,6 +30,7 @@ const TEX_CLOUD := preload("res://assets/cloud_shadow.png")
 const TEX_LEAF := preload("res://assets/leaf.png")
 const TEX_BOARD := preload("res://assets/order_board.png")
 const TEX_COOP := preload("res://assets/coop.png")
+const TEX_BARN := preload("res://assets/barn.png")
 const TEX_MINE := preload("res://assets/mine_arch.png")
 const TEX_BUNTING := preload("res://assets/bunting.png")
 
@@ -65,6 +66,17 @@ const EGG_SPOTS := [
 	Vector2(-512, -452), Vector2(-492, -458), Vector2(-472, -452), Vector2(-452, -458),
 	Vector2(-522, -438), Vector2(-502, -444), Vector2(-482, -438), Vector2(-462, -444),
 	Vector2(-532, -424), Vector2(-512, -430),
+]
+## 西侧畜棚与牛羊散步区
+const BARN_POS := Vector2(-820, -306)
+const BARN_ROAM := Rect2(-890, -220, 170, 95)
+## 牛奶瓶堆放点（畜棚门前左侧，最多 4 瓶）
+const MILK_SPOTS := [
+	Vector2(-852, -248), Vector2(-828, -254), Vector2(-838, -236), Vector2(-860, -240),
+]
+## 羊毛团堆放点（畜棚门前右侧，最多 4 团）
+const WOOL_SPOTS := [
+	Vector2(-788, -248), Vector2(-812, -236), Vector2(-776, -238), Vector2(-800, -226),
 ]
 ## 东侧矿洞：入口拱门与矿岩刷新区
 const MINE_POS := Vector2(1480, 240)
@@ -167,6 +179,9 @@ func _ready() -> void:
 	_add_sprite(TEX_BOARD, BOARD_POS)
 	_add_sprite(TEX_SHADOW, COOP_POS + Vector2(0, 16))
 	_add_sprite(TEX_COOP, COOP_POS + Vector2(0, -6))
+	# 西侧畜棚（牛羊住这里）
+	_add_sprite(TEX_SHADOW, BARN_POS + Vector2(0, 26))
+	_add_sprite(TEX_BARN, BARN_POS + Vector2(0, -6))
 	# 东侧矿洞入口 / 节日彩旗（默认收起，节日当天挂出）
 	_add_sprite(TEX_SHADOW, MINE_POS + Vector2(0, 24))
 	_add_sprite(TEX_MINE, MINE_POS + Vector2(0, -2))

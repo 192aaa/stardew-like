@@ -10,6 +10,9 @@ const TEX_SPRINKLER := preload("res://assets/sprinkler.png")
 const TEX_MACHINE_MAYO := preload("res://assets/machine_mayo.png")
 const TEX_MACHINE_JAM := preload("res://assets/machine_jam.png")
 const TEX_STOVE := preload("res://assets/stove.png")
+const TEX_FURNACE := preload("res://assets/furnace.png")
+const TEX_CHEESE := preload("res://assets/machine_cheese.png")
+const TEX_SPRINKLER2 := preload("res://assets/sprinkler2.png")
 const SCARE_RADIUS := 150.0
 ## 作物 -> 图集列（每株占 4 列：苗/小/大/成熟）
 const CROP_COL := {"parsnip": 0, "potato": 4, "straw": 8, "pumpkin": 12, "corn": 16, "blue": 20}
@@ -22,8 +25,9 @@ const ZONES := [
 
 ## 全局格坐标 -> {tilled, watered, crop, stage, wtoday}
 var tiles := {}
-## 洒水器占用的格子 / 稻草人占用的格子与位置
+## 洒水器占用的格子（浇四邻）/ 高级洒水器（金，浇 3x3）/ 稻草人占用的格子与位置
 var sprinklers := {}
+var sprinklers2 := {}
 var scare_cells := {}
 var protectors: Array[Vector2] = []
 ## 加工机：格子 -> {type: "mayo"/"jam", input: 原料id, ready: 完工产品id}
@@ -67,7 +71,7 @@ func set_preview(mode: String, cell: Vector2i, valid: bool) -> void:
 
 ## 以下 try_* 返回 "" 表示成功，否则返回错误提示
 func try_till(c: Vector2i) -> String:
-	if sprinklers.has(c):
+	if sprinklers.has(c) or sprinklers2.has(c):
 		return "洒水器占着这里"
 	if scare_cells.has(c):
 		return "稻草人立在这里"
@@ -93,7 +97,7 @@ func try_water(c: Vector2i) -> String:
 
 
 func try_plant(c: Vector2i, id: String) -> String:
-	if sprinklers.has(c):
+	if sprinklers.has(c) or sprinklers2.has(c):
 		return "洒水器占着这里"
 	if scare_cells.has(c):
 		return "稻草人立在这里"
@@ -129,7 +133,7 @@ func try_harvest(c: Vector2i) -> String:
 
 ## 放置稻草人（占用格子，守护周围作物）
 func place_scarecrow(c: Vector2i) -> String:
-	if sprinklers.has(c):
+	if sprinklers.has(c) or sprinklers2.has(c):
 		return "洒水器占着这里"
 	if scare_cells.has(c):
 		return "这里已经有稻草人"
@@ -145,7 +149,7 @@ func place_scarecrow(c: Vector2i) -> String:
 
 ## 放置洒水器（清晨自动浇灌四邻格）
 func place_sprinkler(c: Vector2i) -> String:
-	if sprinklers.has(c):
+	if sprinklers.has(c) or sprinklers2.has(c):
 		return "这里已经有洒水器"
 	if scare_cells.has(c):
 		return "稻草人立在这里"
@@ -158,11 +162,26 @@ func place_sprinkler(c: Vector2i) -> String:
 	return ""
 
 
-## 放置加工机（蛋黄酱机/食品加工机，占一格）
+## 放置高级洒水器（金色喷头，清晨自动浇灌 3x3）
+func place_sprinkler2(c: Vector2i) -> String:
+	if sprinklers.has(c) or sprinklers2.has(c):
+		return "这里已经有洒水器"
+	if scare_cells.has(c):
+		return "稻草人立在这里"
+	if machines.has(c):
+		return "机器停在这里"
+	if tiles.has(c) and tiles[c].crop != "":
+		return "先收获这里的作物"
+	sprinklers2[c] = true
+	queue_redraw()
+	return ""
+
+
+## 放置加工机（蛋黄酱机/加工机/灶台/熔炉/奶酪机，占一格）
 func place_machine(c: Vector2i, type: String) -> String:
 	if machines.has(c):
 		return "这里已经有机器了"
-	if sprinklers.has(c):
+	if sprinklers.has(c) or sprinklers2.has(c):
 		return "洒水器占着这里"
 	if scare_cells.has(c):
 		return "稻草人立在这里"
@@ -217,6 +236,13 @@ func on_new_day(raining := false) -> int:
 			if tiles.has(n) and tiles[n].crop != "":
 				tiles[n].watered = true
 				tiles[n].wtoday = true
+	for s2 in sprinklers2:  # 高级洒水器清晨浇灌 3x3
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				var n2: Vector2i = s2 + Vector2i(dx, dy)
+				if tiles.has(n2) and tiles[n2].crop != "":
+					tiles[n2].watered = true
+					tiles[n2].wtoday = true
 	for c in machines:  # 加工机过夜把原料变成产品（灶台无转化，跳过）
 		var m: Dictionary = machines[c]
 		if not Game.MACHINE_INPUTS.has(m.type):
@@ -234,6 +260,7 @@ func on_new_day(raining := false) -> int:
 func restore_from(d: Dictionary) -> void:
 	tiles.clear()
 	sprinklers.clear()
+	sprinklers2.clear()
 	scare_cells.clear()
 	protectors.clear()
 	machines.clear()
@@ -248,6 +275,8 @@ func restore_from(d: Dictionary) -> void:
 		}
 	for s in d.get("sprinklers", []):
 		sprinklers[Vector2i(int(s[0]), int(s[1]))] = true
+	for s in d.get("sprinklers2", []):
+		sprinklers2[Vector2i(int(s[0]), int(s[1]))] = true
 	for s in d.get("scarecrows", []):
 		var sc := Vector2i(int(s[0]), int(s[1]))
 		scare_cells[sc] = true
@@ -272,6 +301,8 @@ func _draw() -> void:
 			draw_texture_rect_region(TEX_CROPS, r, Rect2((col + idx) * CELL, 0, CELL, CELL))
 	for s in sprinklers:
 		draw_texture_rect(TEX_SPRINKLER, Rect2(s.x * CELL, s.y * CELL, CELL, CELL), false)
+	for s in sprinklers2:  # 高级洒水器：金色喷头
+		draw_texture_rect(TEX_SPRINKLER2, Rect2(s.x * CELL, s.y * CELL, CELL, CELL), false)
 	for c in machines:
 		var m: Dictionary = machines[c]
 		var tex: Texture2D = TEX_MACHINE_MAYO
@@ -282,6 +313,12 @@ func _draw() -> void:
 		elif m.type == "stove":
 			tex = TEX_STOVE
 			mh = 28.0
+		elif m.type == "furnace":
+			tex = TEX_FURNACE
+			mh = 26.0
+		elif m.type == "cheese":
+			tex = TEX_CHEESE
+			mh = 24.0
 		draw_texture_rect(tex, Rect2(c.x * CELL, c.y * CELL + CELL - mh, CELL, mh), false)
 		if m.ready != "":  # 完工标记：机器上方亮一颗金星
 			draw_rect(Rect2(c.x * CELL + 13, c.y * CELL - 12, 6, 6), Color(1, 0.9, 0.3))
@@ -299,7 +336,10 @@ func _draw() -> void:
 		elif _preview == "sprinkler":
 			pr = Rect2(_preview_cell.x * CELL, _preview_cell.y * CELL, CELL, CELL)
 			ptex = TEX_SPRINKLER
-		else:  # 加工机/灶台预览
+		elif _preview == "sprinkler2":
+			pr = Rect2(_preview_cell.x * CELL, _preview_cell.y * CELL, CELL, CELL)
+			ptex = TEX_SPRINKLER2
+		else:  # 加工机/灶台/熔炉/奶酪机预览
 			var pmh := 24.0
 			if _preview == "jam":
 				pmh = 22.0
@@ -307,6 +347,12 @@ func _draw() -> void:
 			elif _preview == "stove":
 				pmh = 28.0
 				ptex = TEX_STOVE
+			elif _preview == "furnace":
+				pmh = 26.0
+				ptex = TEX_FURNACE
+			elif _preview == "cheese":
+				pmh = 24.0
+				ptex = TEX_CHEESE
 			pr = Rect2(_preview_cell.x * CELL, _preview_cell.y * CELL + CELL - pmh, CELL, pmh)
 			if _preview == "mayo":
 				ptex = TEX_MACHINE_MAYO

@@ -16,10 +16,14 @@ const TOOL_SEED := {
 }
 const TEX_BOBBER := preload("res://assets/bobber.png")
 const TEX_FISH := preload("res://assets/fish.png")
+const TEX_FISH_GOLD := preload("res://assets/fish_gold.png")
 const TEX_EGG := preload("res://assets/egg.png")
+const TEX_MILK := preload("res://assets/milk.png")
+const TEX_WOOL := preload("res://assets/wool.png")
 const RainScript := preload("res://scripts/rain.gd")
 const VillagerScript := preload("res://scripts/villager.gd")
 const ChickenScript := preload("res://scripts/chicken.gd")
+const LivestockScript := preload("res://scripts/livestock.gd")
 const MineScript := preload("res://scripts/mine.gd")
 const PetScript := preload("res://scripts/pet.gd")
 
@@ -156,6 +160,14 @@ var _dex_ach_labels := {}
 var _chickens: Array = []
 var _egg_sprites: Array = []
 var _chicken_btn: Button
+## 牛羊牧场：牛/羊节点、奶/毛产物精灵、商店购买按钮
+var _cows: Array = []
+var _sheeps: Array = []
+var _milk_sprites: Array = []
+var _wool_sprites: Array = []
+var _cow_btn: Button
+var _sheep_btn: Button
+var _rod_btn: Button
 
 # 矿洞 / 宠物 / 节日
 var mine: Node2D
@@ -177,6 +189,9 @@ var _fish_target := 0.5
 var _fish_timer := 0.0
 var _progress := 30.0
 var _wt := 0.0
+var _hooked_id := ""       # 本次咬钩的鱼（提竿瞬间按权重抽出）
+var _fight_legend := false # 鱼王专属战斗：金条、更凶猛
+var _fish_tip: Label       # 战斗提示文字（鱼王战换文案）
 var _fish_root: Control
 var _fish_bar: ColorRect
 var _fish_icon: TextureRect
@@ -214,6 +229,7 @@ func _ready() -> void:
 	_build_cook()
 	_build_gift()
 	_build_eggs()
+	_build_barn_products()
 	mine = MineScript.new()
 	add_child(mine)
 	_bobber = Sprite2D.new()
@@ -239,6 +255,7 @@ func _ready() -> void:
 	else:
 		_gen_orders()
 		_sync_chickens()
+		_sync_livestock()
 		_sync_pets()
 		_toggle_help(true)
 		_toast("欢迎回来！锄地(1) 浇水(2) 种地，7 鱼竿 8 斧镐，C 制作，H 帮助")
@@ -360,6 +377,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_orders(true)
 		elif player.position.distance_to(decor.COOP_POS) < 80.0:
 			_collect_eggs()
+		elif player.position.distance_to(decor.BARN_POS) < 90.0:
+			_collect_barn()
 		elif player.position.distance_to(decor.SHOP_POS) < 90.0:
 			_toggle_shop(true)
 		elif player.position.distance_to(decor.DOOR_POS) < 80.0 and not sleeping:
@@ -412,15 +431,18 @@ func _update_target() -> void:
 		farm.set_preview("", Vector2i.ZERO, false)
 	else:
 		farm.set_target(cell, true)
-		# 稻草人/洒水器/加工机/灶台有放置预览图，施肥无实体
-		var pm: String = place_mode if (place_mode == "scarecrow" or place_mode == "sprinkler" or place_mode == "mayo" or place_mode == "jam" or place_mode == "stove") else ""
+		# 稻草人/洒水器/加工机/灶台/熔炉/奶酪机有放置预览图，施肥无实体
+		var pm: String = place_mode \
+				if (place_mode == "scarecrow" or place_mode == "sprinkler" \
+				or place_mode == "sprinkler2" \
+				or (place_mode != "" and Game.MACHINE_INPUTS.has(place_mode))) else ""
 		farm.set_preview(pm, cell, pm != "")
 
 
 func _area_cells(center: Vector2i, level: int) -> Array:
 	if level < 2:
 		return [center]
-	var r := 1 if level == 2 else 2
+	var r := 1 if level == 2 else (2 if level == 3 else 3)
 	var out: Array = []
 	for dy in range(-r, r + 1):
 		for dx in range(-r, r + 1):
@@ -477,8 +499,10 @@ func _use_tool() -> void:
 				Sfx.play("hoe")
 				if Game.hoe_level == 2:
 					_toast("铜锄开垦了 %d 块地" % done)
-				elif Game.hoe_level >= 3:
+				elif Game.hoe_level == 3:
 					_toast("铁锄开垦了 %d 块地" % done)
+				else:
+					_toast("金锄开垦了 %d 块地" % done)
 			else:
 				_toast(err)
 		Tool.CAN:
@@ -498,8 +522,10 @@ func _use_tool() -> void:
 				Sfx.play("water")
 				if Game.can_level == 2:
 					_toast("铜壶浇了 %d 块地" % done)
-				elif Game.can_level >= 3:
+				elif Game.can_level == 3:
 					_toast("铁壶浇了 %d 块地" % done)
+				else:
+					_toast("金壶浇了 %d 块地" % done)
 			else:
 				_toast(err)
 		Tool.SEED_PARSNIP, Tool.SEED_POTATO, Tool.SEED_STRAW, Tool.SEED_PUMP, \
@@ -570,6 +596,8 @@ func _fishing_action() -> void:
 			_toast("收回了鱼线")
 		2:
 			fish_state = 3
+			_hooked_id = _pick_fish()
+			_fight_legend = _hooked_id == "legend"
 			_bar_y = 0.5
 			_bar_v = 0.0
 			_progress = 30.0
@@ -577,8 +605,15 @@ func _fishing_action() -> void:
 			_fish_target = randf()
 			_fish_timer = 0.0
 			_bobber.visible = false
+			_fish_icon.texture = TEX_FISH_GOLD if _fight_legend else TEX_FISH
+			_fish_icon.modulate = Color(1, 1, 1)
+			_fish_tip.text = "鱼王之战！按住 空格 抬起金条，罩住金色的鱼王！" \
+					if _fight_legend else "按住 空格 抬起绿条，罩住游动的鱼！"
 			_fish_root.visible = true
-			_toast("按住空格抬起绿条，罩住游动的鱼！")
+			if _fight_legend:
+				_toast("水底金光大作——是鱼王！金条极难操控，稳住！")
+			else:
+				_toast("按住空格抬起绿条，罩住游动的鱼！")
 		3:
 			pass
 
@@ -621,7 +656,9 @@ func _update_fishing(delta: float) -> void:
 
 func _fight_update(delta: float) -> void:
 	var hold := Input.is_action_pressed("use")
-	_bar_v += (-880.0 if hold else 880.0) * delta
+	# 铜钓竿收线更稳：操控速度 x1.2
+	var ctrl := 880.0 * (1.2 if Game.rod_lv >= 2 else 1.0)
+	_bar_v += (-ctrl if hold else ctrl) * delta
 	_bar_v = clampf(_bar_v, -420.0, 420.0)
 	_bar_y += _bar_v * delta
 	if _bar_y < 0.09 or _bar_y > 0.91:
@@ -629,11 +666,15 @@ func _fight_update(delta: float) -> void:
 		_bar_v = 0.0
 	_fish_timer -= delta
 	if _fish_timer <= 0.0:
-		_fish_timer = randf_range(0.4, 1.0)
+		# 鱼王游动更鬼畜：换向更快
+		_fish_timer = randf_range(0.25, 0.6) if _fight_legend else randf_range(0.4, 1.0)
 		_fish_target = randf()
 	_fish_y = lerpf(_fish_y, _fish_target, 1.0 - pow(0.02, delta))
 	var overlap := absf(_fish_y - _bar_y) < 0.14
-	_progress += (40.0 if overlap else -24.0) * delta
+	# 鱼王更凶猛：进度涨得慢、掉得快
+	var up := 30.0 if _fight_legend else 40.0
+	var down := 20.0 if _fight_legend else 24.0
+	_progress += (up if overlap else -down) * delta
 	_update_fish_ui(overlap)
 	if _progress >= 100.0:
 		_land_fish()
@@ -646,12 +687,40 @@ func _update_fish_ui(overlap: bool) -> void:
 	var bar_c := _bar_y * 240.0 - 120.0
 	_fish_bar.offset_top = bar_c - 20.0
 	_fish_bar.offset_bottom = bar_c + 20.0
-	_fish_bar.color = Color(0.55, 0.92, 0.42, 0.6) if overlap else Color(0.35, 0.75, 0.32, 0.45)
+	if _fight_legend:  # 鱼王战：控制条变成金条
+		_fish_bar.color = Color(1, 0.85, 0.3, 0.8) if overlap else Color(0.8, 0.62, 0.18, 0.6)
+	else:
+		_fish_bar.color = Color(0.55, 0.92, 0.42, 0.6) if overlap else Color(0.35, 0.75, 0.32, 0.45)
 	var fish_c := _fish_y * 240.0 - 120.0
 	_fish_icon.offset_top = fish_c - 12.0
 	_fish_icon.offset_bottom = fish_c + 12.0
 	_prog_fill.offset_top = 118.0 - 236.0 * clampf(_progress, 0.0, 100.0) / 100.0
 	_prog_fill.color = Color(0.95, 0.75, 0.3) if _progress > 70.0 else Color(0.9, 0.5, 0.25)
+
+
+## 按时间/天气筛出当前可钓的鱼并按权重抽一条（铜钓竿让稀有鱼权重翻倍）
+func _pick_fish() -> String:
+	var pool: Array = []
+	var total := 0
+	for id in Game.FISH:
+		var f: Dictionary = Game.FISH[id]
+		if f.get("night", false) and time_min < 1080.0:
+			continue  # 虹鳟只在 18 点后
+		if f.get("dusk", false) and time_min < 1200.0:
+			continue  # 月光鱼只在 20 点后
+		if f.get("rain", false) and weather != "rain":
+			continue  # 雨鱼只在雨天
+		var w := int(f.w)
+		if Game.rod_lv >= 2 and (f.get("dusk", false) or f.get("rain", false) or f.get("legend", false)):
+			w *= 2
+		pool.append([id, w])
+		total += w
+	var r := randi() % total
+	for pw in pool:
+		r -= int(pw[1])
+		if r < 0:
+			return String(pw[0])
+	return "smelt"
 
 
 func _land_fish() -> void:
@@ -675,25 +744,7 @@ func _land_fish() -> void:
 		Sfx.play("coin")
 		player.pop()
 		return
-	var pool: Array = []
-	var total := 0
-	for id in Game.FISH:
-		var f: Dictionary = Game.FISH[id]
-		if f.get("night", false) and time_min < 1080.0:
-			continue  # 虹鳟只在 18 点后
-		if f.get("dusk", false) and time_min < 1200.0:
-			continue  # 月光鱼只在 20 点后
-		if f.get("rain", false) and weather != "rain":
-			continue  # 雨鱼只在雨天
-		pool.append(id)
-		total += int(f.w)
-	var pick: String = pool[0]
-	var r := randi() % total
-	for id in pool:
-		r -= int(Game.FISH[id].w)
-		if r < 0:
-			pick = id
-			break
+	var pick: String = _hooked_id
 	var first: bool = Game.mark_fish(pick)
 	Game.add_item(pick, 1)
 	Game.add_xp("fish", 30 if pick == "legend" else 10)
@@ -716,6 +767,9 @@ func _end_fishing() -> void:
 	_bobber.visible = false
 	_bobber.modulate = Color(1, 1, 1)
 	_fish_root.visible = false
+	_fish_icon.texture = TEX_FISH
+	_fish_icon.modulate = Color(1, 1, 1)
+	_fight_legend = false
 	if not sleeping:
 		player.set_physics_process(true)
 
@@ -731,6 +785,9 @@ func _save_payload() -> Dictionary:
 	var sprink: Array = []
 	for c in farm.sprinklers:
 		sprink.append([c.x, c.y])
+	var sprink2: Array = []
+	for c in farm.sprinklers2:
+		sprink2.append([c.x, c.y])
 	var scare: Array = []
 	for c in farm.scare_cells:
 		scare.append([c.x, c.y])
@@ -749,11 +806,17 @@ func _save_payload() -> Dictionary:
 		"friends": Game.friends, "weather": weather,
 		"time_min": time_min, "tool": current_tool,
 		"px": player.position.x, "py": player.position.y,
-		"tiles": tiles, "sprinklers": sprink, "scarecrows": scare, "machines": mach,
+		"tiles": tiles, "sprinklers": sprink, "sprinklers2": sprink2,
+		"scarecrows": scare, "machines": mach,
 		"xp": Game.xp, "skill_lv": Game.skill_lv,
 		"caught_fish": Game.caught_fish, "chest_opened": Game.chest_opened,
 		"chicken_count": Game.chicken_count, "eggs_ready": Game.eggs_ready,
 		"total_eggs": Game.total_eggs, "total_harvest": Game.total_harvest,
+		"rod_lv": Game.rod_lv,
+		"cow_count": Game.cow_count, "sheep_count": Game.sheep_count,
+		"milk_ready": Game.milk_ready, "wool_ready": Game.wool_ready,
+		"total_milk": Game.total_milk, "total_wool": Game.total_wool,
+		"total_bars": Game.total_bars, "total_cheese": Game.total_cheese,
 		"pets": Game.pets, "pet_mood": Game.pet_mood,
 		"orders_done": Game.orders_done, "orders": orders,
 		"achievements": Game.achievements.keys(),
@@ -804,6 +867,15 @@ func _apply_payload(d: Dictionary) -> void:
 	Game.eggs_ready = clampi(int(d.get("eggs_ready", 0)), 0, 10)
 	Game.total_eggs = int(d.get("total_eggs", 0))
 	Game.total_harvest = int(d.get("total_harvest", 0))
+	Game.rod_lv = clampi(int(d.get("rod_lv", 1)), 1, 2)
+	Game.cow_count = clampi(int(d.get("cow_count", 0)), 0, Game.MAX_COWS)
+	Game.sheep_count = clampi(int(d.get("sheep_count", 0)), 0, Game.MAX_SHEEP)
+	Game.milk_ready = clampi(int(d.get("milk_ready", 0)), 0, decor.MILK_SPOTS.size())
+	Game.wool_ready = clampi(int(d.get("wool_ready", 0)), 0, decor.WOOL_SPOTS.size())
+	Game.total_milk = int(d.get("total_milk", 0))
+	Game.total_wool = int(d.get("total_wool", 0))
+	Game.total_bars = int(d.get("total_bars", 0))
+	Game.total_cheese = int(d.get("total_cheese", 0))
 	Game.pets = []
 	for k in d.get("pets", []):
 		if String(k) == "cat" or String(k) == "dog":
@@ -841,6 +913,8 @@ func _apply_payload(d: Dictionary) -> void:
 		float(d.get("py", decor.DOOR_POS.y + 44.0)))
 	farm.restore_from(d)
 	_sync_chickens()
+	_sync_livestock()
+	_refresh_barn_products()
 	_sync_pets()
 	_petted_today.clear()
 	_fest_count = 0
@@ -957,10 +1031,15 @@ func _do_sleep(passed_out: bool) -> void:
 	var lost: int = farm.on_new_day(weather == "rain")
 	gather.spawn_daily()
 	mine.spawn_daily()
-	# 鸡过夜下蛋；订单板刷新 3 张新订单
+	# 鸡过夜下蛋；牛羊过夜产出牛奶/羊毛；订单板刷新 3 张新订单
 	if Game.chicken_count > 0:
 		Game.eggs_ready = mini(Game.eggs_ready + Game.chicken_count, 10)
 		_refresh_eggs()
+	if Game.cow_count > 0:
+		Game.milk_ready = mini(Game.milk_ready + Game.cow_count, decor.MILK_SPOTS.size())
+	if Game.sheep_count > 0:
+		Game.wool_ready = mini(Game.wool_ready + Game.sheep_count, decor.WOOL_SPOTS.size())
+	_refresh_barn_products()
 	_gen_orders()
 	Game.stamina = Game.max_stamina
 	Game.state_changed.emit()
@@ -973,6 +1052,10 @@ func _do_sleep(passed_out: bool) -> void:
 	var rtail := " · 今天下雨，农田已浇好" if weather == "rain" else ""
 	if Game.eggs_ready > 0:
 		rtail += " · 鸡下了 %d 颗蛋" % Game.eggs_ready
+	if Game.milk_ready > 0:
+		rtail += " · 奶牛产了 %d 瓶牛奶" % Game.milk_ready
+	if Game.wool_ready > 0:
+		rtail += " · 绵羊产了 %d 团羊毛" % Game.wool_ready
 	for kind in Game.pets:  # 心情好的宠物次晨送礼
 		if int(Game.pet_mood.get(kind, 0)) >= 60:
 			Game.pet_mood[kind] = 20
@@ -1078,6 +1161,35 @@ func _build_shop() -> void:
 	_chicken_btn = _mk_btn("")
 	_chicken_btn.pressed.connect(_buy_chicken)
 	ck_row.add_child(_chicken_btn)
+	# 牛羊牧场：买奶牛/绵羊（住西侧畜棚，过夜产出）
+	var cow_row := HBoxContainer.new()
+	cow_row.add_theme_constant_override("separation", 8)
+	vb.add_child(cow_row)
+	var cow_l := _mk_label("买奶牛（每天产一瓶牛奶，可做奶酪）", 14)
+	cow_l.custom_minimum_size = Vector2(250, 0)
+	cow_row.add_child(cow_l)
+	_cow_btn = _mk_btn("")
+	_cow_btn.pressed.connect(_buy_livestock.bind("cow"))
+	cow_row.add_child(_cow_btn)
+	var sheep_row := HBoxContainer.new()
+	sheep_row.add_theme_constant_override("separation", 8)
+	vb.add_child(sheep_row)
+	var sheep_l := _mk_label("买绵羊（每天产一团羊毛）", 14)
+	sheep_l.custom_minimum_size = Vector2(250, 0)
+	sheep_row.add_child(sheep_l)
+	_sheep_btn = _mk_btn("")
+	_sheep_btn.pressed.connect(_buy_livestock.bind("sheep"))
+	sheep_row.add_child(_sheep_btn)
+	# 钓竿升级：铜钓竿
+	var rod_row := HBoxContainer.new()
+	rod_row.add_theme_constant_override("separation", 8)
+	vb.add_child(rod_row)
+	var rod_l := _mk_label("钓竿升级为铜钓竿（收线更稳，稀有鱼出现率翻倍）", 14)
+	rod_l.custom_minimum_size = Vector2(250, 0)
+	rod_row.add_child(rod_l)
+	_rod_btn = _mk_btn("")
+	_rod_btn.pressed.connect(_upgrade_rod)
+	rod_row.add_child(_rod_btn)
 	# 宠物领养：猫/狗各一只
 	for pk in ["cat", "dog"]:
 		var p_row := HBoxContainer.new()
@@ -1175,10 +1287,13 @@ func _sell_item(cat: Dictionary, id: String, all: bool) -> void:
 
 func _upgrade(which: String) -> void:
 	var lv: int = Game.hoe_level if which == "hoe" else Game.can_level
-	if lv >= 3:
+	if lv >= 4:
 		return
-	var name_old: String = "锄头" if which == "hoe" else "水壶"
-	var name_new: String = "铜锄" if which == "hoe" else "铜壶"
+	var lv_names: Dictionary = {
+		"hoe": ["锄头", "铜锄", "铁锄", "金锄"],
+		"can": ["水壶", "铜壶", "铁壶", "金壶"],
+	}
+	var names: Array = lv_names[which]
 	if lv == 1:
 		var cost: int = Game.HOE_UP_COST if which == "hoe" else Game.CAN_UP_COST
 		if Game.gold < cost:
@@ -1190,25 +1305,42 @@ func _upgrade(which: String) -> void:
 		else:
 			Game.can_level = 2
 		Sfx.play("coin")
-		_toast("%s升级为%s！范围 3x3" % [name_old, name_new])
+		_toast("%s升级为%s！范围 3x3" % [names[0], names[1]])
 		return
-	# 铁质升级：金币 + 铜矿
-	var cost2: int = Game.HOE_UP2_COST if which == "hoe" else Game.CAN_UP2_COST
-	if Game.gold < cost2:
+	if lv == 2:
+		# 铁质升级：金币 + 铜矿
+		var cost2: int = Game.HOE_UP2_COST if which == "hoe" else Game.CAN_UP2_COST
+		if Game.gold < cost2:
+			_toast("金币不足！")
+			return
+		if Game.items.get("copper", 0) < Game.IRON_ORE_COST:
+			_toast("铜矿不够！去东侧矿洞敲 %d 块铜矿" % Game.IRON_ORE_COST)
+			return
+		Game.add_gold(-cost2)
+		Game.add_item("copper", -Game.IRON_ORE_COST)
+		if which == "hoe":
+			Game.hoe_level = 3
+		else:
+			Game.can_level = 3
+		Sfx.play("coin")
+		_toast("%s升级为%s！范围 5x5" % [names[1], names[2]])
+		return
+	# 金质升级：金币 + 铁锭（熔炉可把铁矿熔成铁锭）
+	var cost3: int = Game.HOE_UP3_COST if which == "hoe" else Game.CAN_UP3_COST
+	if Game.gold < cost3:
 		_toast("金币不足！")
 		return
-	if Game.items.get("copper", 0) < Game.IRON_ORE_COST:
-		_toast("铜矿不够！去东侧矿洞敲 %d 块铜矿" % Game.IRON_ORE_COST)
+	if Game.items.get("iron_bar", 0) < Game.GOLD_BAR_COST:
+		_toast("铁锭不够！先造熔炉（C 制作）把铁矿熔成铁锭 x%d" % Game.GOLD_BAR_COST)
 		return
-	Game.add_gold(-cost2)
-	Game.add_item("copper", -Game.IRON_ORE_COST)
-	var name_iron: String = "铁锄" if which == "hoe" else "铁壶"
+	Game.add_gold(-cost3)
+	Game.add_item("iron_bar", -Game.GOLD_BAR_COST)
 	if which == "hoe":
-		Game.hoe_level = 3
+		Game.hoe_level = 4
 	else:
-		Game.can_level = 3
+		Game.can_level = 4
 	Sfx.play("coin")
-	_toast("%s升级为%s！范围 5x5" % [name_new, name_iron])
+	_toast("%s升级为%s！范围 7x7，一下管到整片田" % [names[2], names[3]])
 
 
 ## 商店领养宠物（猫/狗各一只）
@@ -1324,6 +1456,10 @@ func _machine_interact(m: Dictionary) -> void:
 	if data.ready != "":
 		var pid: String = data.ready
 		Game.add_item(pid, 1)
+		if pid == "copper_bar" or pid == "iron_bar":
+			Game.total_bars += 1  # 熔炉成品计数（成就）
+		elif pid == "cheese":
+			Game.total_cheese += 1
 		Game.add_xp("farm", 6)
 		data.ready = ""
 		farm.queue_redraw()
@@ -1668,9 +1804,9 @@ func _build_craft() -> void:
 	craft_panel.anchor_right = 0.5
 	craft_panel.anchor_bottom = 0.5
 	craft_panel.offset_left = -250.0
-	craft_panel.offset_top = -248.0
+	craft_panel.offset_top = -330.0
 	craft_panel.offset_right = 250.0
-	craft_panel.offset_bottom = 248.0
+	craft_panel.offset_bottom = 330.0
 	craft_panel.visible = false
 	$UI.add_child(craft_panel)
 	var vb := VBoxContainer.new()
@@ -1699,10 +1835,13 @@ func _build_craft() -> void:
 		row.add_child(b)
 	vb.add_child(_mk_label("稻草人：守护周围作物，夜里乌鸦不敢来", 13))
 	vb.add_child(_mk_label("洒水器：每天清晨自动浇灌上下左右四格", 13))
+	vb.add_child(_mk_label("高级洒水器：金色喷头，清晨自动浇灌 3x3 九宫格", 13))
 	vb.add_child(_mk_label("速效肥：对已种作物的格子按空格施肥，立刻长一节", 13))
 	vb.add_child(_mk_label("蛋黄酱机：按 E 放入鸡蛋，隔天收蛋黄酱（160g）", 13))
 	vb.add_child(_mk_label("食品加工机：按 E 放入南瓜/草莓/防风草，隔天变派/酱/腌菜", 13))
 	vb.add_child(_mk_label("灶台：放到农田格子上，对它按 E 打开烹饪面板做料理", 13))
+	vb.add_child(_mk_label("熔炉：按 E 放入铜矿/铁矿，隔天熔成铜锭（150g）/铁锭（320g）", 13))
+	vb.add_child(_mk_label("奶酪机：按 E 放入牛奶，隔天变奶酪（550g）", 13))
 	vb.add_child(_mk_label("按 C / Esc 关闭", 12))
 
 
@@ -1735,7 +1874,9 @@ func _place_at_target() -> void:
 		msg = farm.place_scarecrow(cell)
 	elif place_mode == "sprinkler":
 		msg = farm.place_sprinkler(cell)
-	elif place_mode == "mayo" or place_mode == "jam" or place_mode == "stove":
+	elif place_mode == "sprinkler2":
+		msg = farm.place_sprinkler2(cell)
+	elif place_mode != "fertilizer":
 		msg = farm.place_machine(cell, place_mode)
 	else:
 		msg = farm.try_fertilize(cell)
@@ -1899,7 +2040,7 @@ func _gen_orders() -> void:
 		if Game.FISH[id].get("legend", false):
 			continue  # 鱼王太稀有，不进订单
 		picks.append(["fish", id])
-	for id in ["wood", "stone", "berry"]:
+	for id in ["wood", "stone", "berry", "milk", "wool"]:
 		picks.append(["mat", id])
 	picks.shuffle()
 	var cat_count := {"crop": 0, "fish": 0, "mat": 0}
@@ -1925,7 +2066,7 @@ func _make_order(kind: String, id: String) -> Dictionary:
 		n = 1 if base >= 100 else 1 + randi() % 2
 	else:
 		base = Game.MATERIALS[id].sell
-		n = 2 + randi() % 4
+		n = 2 + randi() % 4 if base <= 30 else 1 + randi() % 2
 	var gold := int(ceil(base * n * 1.55 / 5.0)) * 5
 	return {
 		"kind": kind, "item": id, "n": n, "gold": gold,
@@ -2008,6 +2149,120 @@ func _buy_chicken() -> void:
 	_refresh_hud()
 
 
+# ---------- 牛羊牧场 ----------
+
+func _buy_livestock(kind: String) -> void:
+	var is_cow := kind == "cow"
+	var count: int = Game.cow_count if is_cow else Game.sheep_count
+	var cap: int = Game.MAX_COWS if is_cow else Game.MAX_SHEEP
+	var cost: int = Game.COW_COST if is_cow else Game.SHEEP_COST
+	var cname: String = "奶牛" if is_cow else "绵羊"
+	if count >= cap:
+		_toast("畜棚住满啦（%s最多 %d 只）" % [cname, cap])
+		return
+	if Game.gold < cost:
+		_toast("金币不足！")
+		return
+	Game.add_gold(-cost)
+	if is_cow:
+		Game.cow_count += 1
+	else:
+		Game.sheep_count += 1
+	_sync_livestock()
+	Sfx.play("coin")
+	_toast("买了一只%s！它住在西侧畜棚，每天产出%s" % [cname, "牛奶" if is_cow else "羊毛"])
+	_refresh_hud()
+
+
+func _sync_livestock() -> void:
+	while _cows.size() > Game.cow_count:
+		var c: Node2D = _cows.pop_back()
+		c.queue_free()
+	while _cows.size() < Game.cow_count:
+		var c2: Node2D = LivestockScript.new()
+		c2.setup("cow", decor.BARN_ROAM, decor.BARN_ROAM.get_center()
+				+ Vector2(randf_range(-40, 40), randf_range(-20, 20)))
+		add_child(c2)
+		_cows.append(c2)
+	while _sheeps.size() > Game.sheep_count:
+		var s: Node2D = _sheeps.pop_back()
+		s.queue_free()
+	while _sheeps.size() < Game.sheep_count:
+		var s2: Node2D = LivestockScript.new()
+		s2.setup("sheep", decor.BARN_ROAM, decor.BARN_ROAM.get_center()
+				+ Vector2(randf_range(-40, 40), randf_range(-20, 20)))
+		add_child(s2)
+		_sheeps.append(s2)
+
+
+func _build_barn_products() -> void:
+	for p in decor.MILK_SPOTS:
+		var s := Sprite2D.new()
+		s.texture = TEX_MILK
+		s.position = p
+		s.visible = false
+		add_child(s)
+		_milk_sprites.append(s)
+	for p in decor.WOOL_SPOTS:
+		var s2 := Sprite2D.new()
+		s2.texture = TEX_WOOL
+		s2.position = p
+		s2.visible = false
+		add_child(s2)
+		_wool_sprites.append(s2)
+	_refresh_barn_products()
+
+
+func _refresh_barn_products() -> void:
+	for i in _milk_sprites.size():
+		_milk_sprites[i].visible = i < Game.milk_ready
+	for i in _wool_sprites.size():
+		_wool_sprites[i].visible = i < Game.wool_ready
+
+
+func _collect_barn() -> void:
+	if Game.milk_ready + Game.wool_ready <= 0:
+		if Game.cow_count + Game.sheep_count > 0:
+			_toast("牛羊还没产出，明天再来收吧")
+		else:
+			_toast("畜棚还空着：商店可买奶牛（2500g）或绵羊（2000g）")
+		return
+	if Game.milk_ready > 0:
+		Game.add_item("milk", Game.milk_ready)
+		Game.total_milk += Game.milk_ready
+		Game.add_xp("gather", 5 * Game.milk_ready)
+		_float_text("+%d 牛奶" % Game.milk_ready, decor.BARN_POS + Vector2(-32, -46), Color(0.95, 0.97, 1))
+	if Game.wool_ready > 0:
+		Game.add_item("wool", Game.wool_ready)
+		Game.total_wool += Game.wool_ready
+		Game.add_xp("gather", 5 * Game.wool_ready)
+		_float_text("+%d 羊毛" % Game.wool_ready, decor.BARN_POS + Vector2(32, -46), Color(1, 0.98, 0.9))
+	var nm := Game.milk_ready
+	var nw := Game.wool_ready
+	Game.milk_ready = 0
+	Game.wool_ready = 0
+	_refresh_barn_products()
+	player.pop()
+	Sfx.play("pick")
+	_toast("收好了 %d 瓶牛奶、%d 团羊毛！奶酪机可把牛奶变奶酪" % [nm, nw])
+
+
+func _upgrade_rod() -> void:
+	if Game.rod_lv >= 2:
+		return
+	if Game.gold < Game.ROD_UP_COST:
+		_toast("金币不足！")
+		return
+	if Game.items.get("copper", 0) < Game.ROD_UP_ORE:
+		_toast("铜矿不够！去东侧矿洞敲 %d 块铜矿" % Game.ROD_UP_ORE)
+		return
+	Game.add_gold(-Game.ROD_UP_COST)
+	Game.add_item("copper", -Game.ROD_UP_ORE)
+	Game.rod_lv = 2
+	Sfx.play("coin")
+	_toast("鱼竿升级为铜钓竿！收线更稳，月光鱼/雨鱼/鱼王出现率翻倍")
+
+
 func _collect_eggs() -> void:
 	if Game.eggs_ready <= 0:
 		if Game.chicken_count > 0:
@@ -2036,9 +2291,9 @@ func _build_dex() -> void:
 	_dex_panel.anchor_right = 0.5
 	_dex_panel.anchor_bottom = 0.5
 	_dex_panel.offset_left = -290.0
-	_dex_panel.offset_top = -268.0
+	_dex_panel.offset_top = -330.0
 	_dex_panel.offset_right = 290.0
-	_dex_panel.offset_bottom = 268.0
+	_dex_panel.offset_bottom = 330.0
 	_dex_panel.visible = false
 	$UI.add_child(_dex_panel)
 	var vb := VBoxContainer.new()
@@ -2174,18 +2429,18 @@ func _build_help() -> void:
 	])
 	_help_section(col_l, "钓鱼（7 鱼竿）", [
 		"池塘边空格甩竿 → 浮漂变红瞬间再按空格提竿",
-		"按住空格抬起绿条罩住游动的鱼，进度条满即钓获；虹鳟只在 18:00 后咬钩",
-		"月光鱼只在 20:00 后、雨鱼只在雨天；传说鱼王随时 2% 上钩，价值 1200g",
-		"钓鱼有 12% 概率钓上宝箱：开箱得金币或材料大礼",
+		"按住空格抬起绿条罩住游动的鱼；虹鳟只在 18:00 后，月光鱼 20:00 后、雨鱼雨天",
+		"商店可升铜钓竿（1800g+铜x5）：收线更稳，稀有鱼出现率翻倍",
+		"传说鱼王上钩会变成金条挑战（极凶猛），钓起价值 1200g；12% 概率钓上宝箱",
 	])
 	_help_section(col_l, "采集与制作（8 斧镐 / C 制作）", [
 		"敲石头得石料、敲树枝得木材，北边野莓丛按 E 采摘野莓，每天会补充刷新",
-		"稻草人防乌鸦；洒水器清晨浇灌四邻格；速效肥让作物立刻长一节",
+		"洒水器浇四邻格；高级洒水器（铁锭造）浇 3x3；速效肥让作物立刻长一节",
 		"制作后移动到目标格子按空格放置，Esc 取消",
 	])
-	_help_section(col_l, "矿洞挖矿（新增）", [
+	_help_section(col_l, "矿洞挖矿与熔炉（新增）", [
 		"东侧矿洞区每天刷新矿岩：8 斧镐敲击，可得铜矿/铁矿/宝石",
-		"矿石可出售；金币+5 铜矿能把铜锄/铜壶升成铁锄/铁壶（5x5 范围）",
+		"C 造熔炉（石8木2）：放矿隔夜铸锭；金币+矿可升铜→铁→金锄壶（3x3/5x5/7x7）",
 	])
 	_help_section(col_l, "天气与村民", [
 		"雨天雨水自动浇灌农田、鱼更容易上钩；晴天记得自己浇水",
@@ -2201,9 +2456,9 @@ func _build_help() -> void:
 		"好感达 20/40/60/80 首次回赠：金币/种子/宝石/挚友大礼",
 	])
 	_help_section(col_r, "加工产业链（新增）", [
-		"C 制作蛋黄酱机/食品加工机/灶台，放到农田格子上",
+		"C 制作蛋黄酱机/食品加工机/灶台/熔炉/奶酪机，放到农田格子上",
 		"对着机器按 E 放入原料，隔天机器亮金点再按 E 收成品",
-		"鸡蛋→蛋黄酱　草莓→草莓酱　防风草→腌菜　南瓜→南瓜派，售价翻倍",
+		"蛋→蛋黄酱　南瓜→派；矿→铜/铁锭　牛奶→奶酪，售价更高",
 	])
 	_help_section(col_r, "宠物与节日（新增）", [
 		"商店领养小猫/小狗（500g），摸头 +30 心情，满 60 次晨叼礼物来",
@@ -2211,7 +2466,7 @@ func _build_help() -> void:
 	])
 	_help_section(col_r, "订单与养殖", [
 		"货摊旁任务板按 E 接订单：每天 3 张，交作物/鱼/材料得金币与好感",
-		"商店买小鸡 800g（最多 4 只），每天下蛋，鸡舍前按 E 捡蛋可卖 60g",
+		"养鸡 800g/只（最多4）每天下蛋；奶牛 2500g、绵羊 2000g 住畜棚产奶产毛",
 	])
 	_help_section(col_r, "图鉴·技能·存档（G）", [
 		"按 G 打开面板：技能等级、6 种鱼类图鉴（含鱼王）、宝箱与成就进度",
@@ -2342,20 +2597,21 @@ func _build_fishing_ui() -> void:
 	tip.offset_bottom = 154.0
 	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_fish_root.add_child(tip)
+	_fish_tip = tip
 
 
 func _refresh_hud() -> void:
 	gold_label.text = "金币 %d" % Game.gold
 	var texts := [
-		"1 %s" % ["锄头", "铜锄头", "铁锄头"][Game.hoe_level - 1],
-		"2 %s" % ["水壶", "铜水壶", "铁水壶"][Game.can_level - 1],
+		"1 %s" % ["锄头", "铜锄头", "铁锄头", "金锄头"][Game.hoe_level - 1],
+		"2 %s" % ["水壶", "铜水壶", "铁水壶", "金水壶"][Game.can_level - 1],
 		"3 防风草种 x%d" % Game.seeds.parsnip,
 		"4 土豆种 x%d" % Game.seeds.potato,
 		"5 草莓种 x%d" % Game.seeds.straw,
 		"6 南瓜种 x%d" % Game.seeds.pumpkin,
 		"9 玉米种 x%d" % Game.seeds.corn,
 		"0 蓝莓种 x%d" % Game.seeds.blue,
-		"7 鱼竿",
+		"7 %s" % ("铜钓竿" if Game.rod_lv >= 2 else "鱼竿"),
 		"8 斧镐",
 	]
 	# 槽位顺序：1锄 2壶 3-6作物种 | 槽7=玉米种(9) 槽8=蓝莓种(0) 槽9=鱼竿(7) 槽10=斧镐(8)
@@ -2384,15 +2640,31 @@ func _refresh_hud() -> void:
 		else:
 			_shop_rows[id].text = "背包 x%d" % Game.items.get(id, 0)
 	if _hoe_btn:
-		_hoe_btn.text = "铜锄 500g" if Game.hoe_level == 1 else ("铁锄 2200g+铜x5" if Game.hoe_level == 2 else "已满级")
-		_hoe_btn.disabled = Game.hoe_level >= 3
-		_can_btn.text = "铜壶 500g" if Game.can_level == 1 else ("铁壶 2200g+铜x5" if Game.can_level == 2 else "已满级")
-		_can_btn.disabled = Game.can_level >= 3
+		_hoe_btn.text = "铜锄 500g" if Game.hoe_level == 1 else \
+				("铁锄 2200g+铜x5" if Game.hoe_level == 2 \
+				else ("金锄 5000g+铁锭x3" if Game.hoe_level == 3 else "已满级"))
+		_hoe_btn.disabled = Game.hoe_level >= 4
+		_can_btn.text = "铜壶 500g" if Game.can_level == 1 else \
+				("铁壶 2200g+铜x5" if Game.can_level == 2 \
+				else ("金壶 5000g+铁锭x3" if Game.can_level == 3 else "已满级"))
+		_can_btn.disabled = Game.can_level >= 4
 	# 买鸡按钮
 	if _chicken_btn:
 		_chicken_btn.text = "买小鸡 %dg" % Game.CHICKEN_COST \
 				if Game.chicken_count < Game.MAX_CHICKENS else "已住满"
 		_chicken_btn.disabled = Game.chicken_count >= Game.MAX_CHICKENS
+	# 牛羊与钓竿按钮
+	if _cow_btn:
+		_cow_btn.text = "买奶牛 %dg" % Game.COW_COST \
+				if Game.cow_count < Game.MAX_COWS else "已住满"
+		_cow_btn.disabled = Game.cow_count >= Game.MAX_COWS
+	if _sheep_btn:
+		_sheep_btn.text = "买绵羊 %dg" % Game.SHEEP_COST \
+				if Game.sheep_count < Game.MAX_SHEEP else "已住满"
+		_sheep_btn.disabled = Game.sheep_count >= Game.MAX_SHEEP
+	if _rod_btn:
+		_rod_btn.text = "铜钓竿 1800g+铜x5" if Game.rod_lv == 1 else "已满级"
+		_rod_btn.disabled = Game.rod_lv >= 2
 	# 领养宠物按钮（在 _build_shop 后才有）
 	if not _pet_btns.is_empty():
 		for pk in _pet_btns:
@@ -2443,6 +2715,13 @@ func _update_hint() -> void:
 			txt = "小鸡们正在散步，下蛋后按 E 来捡"
 		else:
 			txt = "鸡舍还空着：商店可买小鸡（800g）"
+	elif player.position.distance_to(decor.BARN_POS) < 90.0:
+		if Game.milk_ready + Game.wool_ready > 0:
+			txt = "畜棚前有 %d 瓶牛奶、%d 团羊毛：按 E 收起来" % [Game.milk_ready, Game.wool_ready]
+		elif Game.cow_count + Game.sheep_count > 0:
+			txt = "牛羊们正在散步，产出后按 E 来收"
+		else:
+			txt = "畜棚还空着：商店可买奶牛（2500g）或绵羊（2000g）"
 	elif player.position.distance_to(decor.SHOP_POS) < 90.0:
 		txt = "按 E 打开商店"
 	elif player.position.distance_to(decor.DOOR_POS) < 80.0:
