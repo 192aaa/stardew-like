@@ -106,6 +106,44 @@ const ROD_UP_ORE := 5
 ## 宠物：领养价（猫/狗各一只）
 const PET_COST := 500
 
+## 新手引导：首日五步（与 main.gd 顶部引导条一一对应）
+const GUIDE_STEPS := ["锄地", "浇水", "播种", "收获", "卖货"]
+## 建造温室的花费（温室无视季节，冬天也能种）
+const GH_COST := 6000
+const GH_WOOD := 25
+const GH_STONE := 15
+
+## 七日目标：逐日阶段目标，达成后自动发奖（kind 对应 goal_progress 统计口径）
+const DAY_GOALS := [
+	{"day": 1, "name": "开垦 3 块地", "kind": "till", "n": 3,
+		"gold": 100, "seed": "parsnip", "seed_n": 2},
+	{"day": 2, "name": "种下 3 株作物", "kind": "plant", "n": 3,
+		"gold": 120, "seed": "parsnip", "seed_n": 2},
+	{"day": 3, "name": "收获 3 株作物", "kind": "harvest", "n": 3,
+		"gold": 150, "seed": "potato", "seed_n": 2},
+	{"day": 4, "name": "钓上 1 条鱼", "kind": "fish", "n": 1,
+		"gold": 150, "seed": "straw", "seed_n": 2},
+	{"day": 5, "name": "累计赚到 500 金币", "kind": "earn", "n": 500,
+		"gold": 200, "seed": "corn", "seed_n": 2},
+	{"day": 6, "name": "完成 1 张订单", "kind": "order", "n": 1,
+		"gold": 200, "seed": "blue", "seed_n": 2},
+	{"day": 7, "name": "村民好感合计 20", "kind": "friend", "n": 20,
+		"gold": 300, "seed": "pumpkin", "seed_n": 2},
+]
+
+## 社区收集包：need = [分类 crop/fish/mat, 物品id, 数量]，
+## 交付完成给金币并永久提高体力上限（换成长线目标感）
+const BUNDLES := {
+	"crop": {"name": "农产收集包", "gold": 900, "stamina": 10, "need": [
+		["crop", "parsnip", 5], ["crop", "potato", 3], ["crop", "straw", 2]]},
+	"fish": {"name": "渔夫收集包", "gold": 1200, "stamina": 10, "need": [
+		["fish", "smelt", 4], ["fish", "perch", 3], ["fish", "trout", 1]]},
+	"mine": {"name": "矿工收集包", "gold": 1500, "stamina": 10, "need": [
+		["mat", "copper", 10], ["mat", "iron", 6], ["mat", "gem", 1]]},
+	"ranch": {"name": "牧场收集包", "gold": 1000, "stamina": 10, "need": [
+		["mat", "milk", 3], ["mat", "wool", 2], ["mat", "egg", 5]]},
+}
+
 ## 技能系统：三类经验，每 XP_PER_LEVEL 点升 1 级，升级 max_stamina +10
 const XP_PER_LEVEL := 100
 const MAX_SKILL_LV := 5
@@ -205,6 +243,17 @@ var gift_count := 0     # 累计送礼次数
 ## 送礼里程碑回赠记录：{村民id: [4 个 bool]}，入存档防重复领取
 var gift_milestones := {"rosa": [false, false, false, false], "ben": [false, false, false, false]}
 
+## 新手引导进度：0 锄地 / 1 浇水 / 2 播种 / 3 收获 / 4 卖货，5 = 已完成
+var guide_step := 0
+## 七日目标：统计口径 + 已发奖记录 {day: true}
+var total_tilled := 0
+var total_planted := 0
+var total_earned := 0
+var goals_claimed := {}
+## 温室是否已建造 / 已完成的收集包 id
+var greenhouse_built := false
+var bundles_done: Array = []
+
 
 ## 当前季节下标（0 春 / 1 夏 / 2 秋 / 3 冬）
 func season_index() -> int:
@@ -238,8 +287,53 @@ func crop_seasons(id: String) -> String:
 	return "" if out.is_empty() else "、".join(out)
 
 
+## 温室播种判定：温室内无视季节（farm.try_plant 调用）
+func can_plant_in(greenhouse: bool, id: String) -> bool:
+	return greenhouse or can_plant(id)
+
+
+## 七日目标统计口径 -> 当前累计值
+func goal_progress(kind: String) -> int:
+	match kind:
+		"till":
+			return total_tilled
+		"plant":
+			return total_planted
+		"harvest":
+			return total_harvest
+		"fish":
+			var n := 0
+			for k in caught_fish:
+				n += int(caught_fish[k])
+			return n
+		"earn":
+			return total_earned
+		"order":
+			return orders_done
+		"friend":
+			return int(friends.get("rosa", 0)) + int(friends.get("ben", 0))
+	return 0
+
+
+## 收集包物品持有量（作物在 harvest 仓，其余在 items 背包）
+func bundle_stock(kind: String, id: String) -> int:
+	if kind == "crop":
+		return int(harvest.get(id, 0))
+	return int(items.get(id, 0))
+
+
+func bundle_name(kind: String, id: String) -> String:
+	if kind == "crop":
+		return String(CROPS[id].name)
+	if kind == "fish":
+		return String(FISH[id].name)
+	return String(MATERIALS.get(id, {"name": id}).name)
+
+
 func add_gold(n: int) -> void:
 	gold += n
+	if n > 0:
+		total_earned += n  # 七日目标「累计赚钱」统计
 	state_changed.emit()
 
 
@@ -401,4 +495,11 @@ func reset_state() -> void:
 	total_cooked = 0
 	gift_count = 0
 	gift_milestones = {"rosa": [false, false, false, false], "ben": [false, false, false, false]}
+	guide_step = 0
+	total_tilled = 0
+	total_planted = 0
+	total_earned = 0
+	goals_claimed = {}
+	greenhouse_built = false
+	bundles_done = []
 	state_changed.emit()

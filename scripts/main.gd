@@ -262,6 +262,18 @@ var _set_sfx_pct: Label
 # 触屏控制层（虚拟摇杆 + 动作按钮），由 touch_controls.gd 实现
 var _touch
 
+# 新手引导条 / 七日目标/ 收集包面板 / 温室购买按钮（新增系统）
+var _guide_panel: PanelContainer
+var _guide_label: Label
+var _goal_panel: PanelContainer
+var _goal_label: Label
+var _goal_t := 0.0
+var bundles_open := false
+var _bundles_panel: PanelContainer
+var _bundle_descs: Array = []
+var _bundle_btns: Array = []
+var _gh_btn: Button
+
 
 func _ready() -> void:
 	_ui_font = SystemFont.new()
@@ -289,6 +301,8 @@ func _ready() -> void:
 	add_child(_bobber)
 	_build_dialog()
 	_build_hud_extras()
+	_build_guide()
+	_build_bundles()
 	_rain_node = RainScript.new()
 	_rain_node.z_index = 40
 	_rain_node.visible = false
@@ -311,6 +325,9 @@ func _ready() -> void:
 		_sync_pets()
 		_toggle_help(true)
 		_toast("欢迎回来！锄地(1) 浇水(2) 种地，7 鱼竿 8 斧镐，C 制作，H 帮助")
+	decor.set_greenhouse(Game.greenhouse_built)
+	_refresh_guide()
+	_goal_refresh()
 	_refresh_festival()
 	Net.net_message.connect(_on_net_msg)
 	Net.net_error.connect(_on_net_error)
@@ -357,6 +374,13 @@ func _process(delta: float) -> void:
 		_shadow.position = _shadow.position.lerp(_shadow_tp, clampf(delta * 12.0, 0.0, 1.0))
 	_update_target()
 	_update_hint()
+	# 七日目标每秒校验一次（统计口径来自累计计数，跨联机 guest 不参与结算）
+	_goal_t += delta
+	if _goal_t >= 1.0:
+		_goal_t = 0.0
+		if not Net.is_guest():
+			_goal_check()
+		_goal_refresh()
 	if shop_open and player.position.distance_to(decor.SHOP_POS) > 130.0:
 		_toggle_shop(false)
 	if orders_open and player.position.distance_to(decor.BOARD_POS) > 100.0:
@@ -397,6 +421,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_toast("背景音乐已%s（M 切换）" % ("开启" if not m else "关闭"))
 	elif event.is_action_pressed("codex"):
 		_toggle_dex(not dex_open)
+	elif event.is_action_pressed("bundle"):
+		_toggle_bundles(not bundles_open)
 	elif event.is_action_pressed("minimap"):
 		_minimap.toggle()
 	elif event.is_action_pressed("chat"):
@@ -423,6 +449,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_help(false)
 		elif dex_open:
 			_toggle_dex(false)
+		elif bundles_open:
+			_toggle_bundles(false)
 		elif orders_open:
 			_toggle_orders(false)
 		elif craft_open:
@@ -453,6 +481,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_help(false)
 		elif dex_open:
 			_toggle_dex(false)
+		elif bundles_open:
+			_toggle_bundles(false)
 		elif orders_open:
 			_toggle_orders(false)
 		elif shop_open:
@@ -472,7 +502,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT \
 			and event.pressed and not shop_open and not craft_open \
 			and not orders_open and not dex_open and place_mode == "" \
-			and not cook_open and not gift_open and not settings_open:
+			and not cook_open and not gift_open and not settings_open \
+			and not bundles_open:
 		_use_tool()
 
 
@@ -485,6 +516,8 @@ func _interact_chain() -> void:
 		_toggle_help(false)
 	elif dex_open:
 		_toggle_dex(false)
+	elif bundles_open:
+		_toggle_bundles(false)
 	elif orders_open:
 		_toggle_orders(false)
 	elif shop_open:
@@ -626,6 +659,7 @@ func _use_tool() -> void:
 		if _fest_kind(Game.day) == "harvest":
 			_fest_count += n
 			hmsg += "　[丰收祭 %d/5]" % _fest_count
+		_guide_advance(3)  # 新手引导：收获
 		_toast(hmsg)
 		_float_text("+%d %s" % [n, Game.CROPS[got].name], _cell_center(cell), Color(1, 0.9, 0.35))
 		Sfx.play("harvest")
@@ -647,6 +681,8 @@ func _use_tool() -> void:
 			if done > 0:
 				player.pop()
 				Sfx.play("hoe")
+				Game.total_tilled += done
+				_guide_advance(0)  # 新手引导：锄地
 				if Game.hoe_level == 2:
 					_toast("铜锄开垦了 %d 块地" % done)
 				elif Game.hoe_level == 3:
@@ -670,6 +706,7 @@ func _use_tool() -> void:
 			if done > 0:
 				player.pop()
 				Sfx.play("water")
+				_guide_advance(1)  # 新手引导：浇水
 				if Game.can_level == 2:
 					_toast("铜壶浇了 %d 块地" % done)
 				elif Game.can_level == 3:
@@ -688,6 +725,8 @@ func _use_tool() -> void:
 			if msg == "":
 				Game.use_seed(id, 1)
 				Game.add_xp("farm", 2)
+				Game.total_planted += 1
+				_guide_advance(2)  # 新手引导：播种
 				_toast("种下了%s" % Game.CROPS[id].name)
 				Sfx.play("plant")
 				player.pop()
@@ -1000,6 +1039,11 @@ func _save_payload() -> Dictionary:
 		"gift_milestones": Game.gift_milestones,
 		"total_cooked": Game.total_cooked, "gift_count": Game.gift_count,
 		"rocks": mine.payload(),
+		# 新手引导 / 七日目标 / 温室 / 收集包
+		"guide_step": Game.guide_step,
+		"total_tilled": Game.total_tilled, "total_planted": Game.total_planted,
+		"total_earned": Game.total_earned, "goals_claimed": Game.goals_claimed,
+		"greenhouse_built": Game.greenhouse_built, "bundles_done": Game.bundles_done,
 	}
 
 
@@ -1079,6 +1123,24 @@ func _apply_payload(d: Dictionary) -> void:
 	for id in d.get("achievements", []):
 		if Game.ACHIEVEMENTS.has(id):
 			Game.achievements[id] = true
+	# 新增系统：旧档没有这些字段时默认「引导已完成、未建温室」，避免老玩家被引导打扰
+	Game.guide_step = clampi(int(d.get("guide_step", 5)), 0, Game.GUIDE_STEPS.size())
+	Game.total_tilled = int(d.get("total_tilled", 0))
+	Game.total_planted = int(d.get("total_planted", 0))
+	Game.total_earned = int(d.get("total_earned", 0))
+	Game.greenhouse_built = bool(d.get("greenhouse_built", false))
+	Game.bundles_done = []
+	for b in d.get("bundles_done", []):
+		if Game.BUNDLES.has(String(b)):
+			Game.bundles_done.append(String(b))
+	Game.goals_claimed = {}
+	var gc: Dictionary = d.get("goals_claimed", {})
+	for k in gc:
+		var gd: int = String(k).to_int()
+		if gd >= 1 and gd <= Game.DAY_GOALS.size() and bool(gc[k]):
+			Game.goals_claimed[gd] = true
+	decor.set_greenhouse(Game.greenhouse_built)
+	_refresh_guide()
 	_orders.clear()
 	for row in d.get("orders", []):
 		_orders.append({
@@ -1220,6 +1282,7 @@ func _do_sleep(passed_out: bool) -> void:
 		Game.wool_ready = mini(Game.wool_ready + Game.sheep_count, decor.WOOL_SPOTS.size())
 	_refresh_barn_products()
 	_gen_orders()
+	_goal_check()  # 新的一天：补发已达成的阶段目标
 	Game.stamina = Game.max_stamina
 	Game.state_changed.emit()
 	_talked_today.clear()
@@ -1290,6 +1353,8 @@ func _close_panels() -> void:
 		_toggle_orders(false)
 	if dex_open:
 		_toggle_dex(false)
+	if bundles_open:
+		_toggle_bundles(false)
 	if cook_open:
 		_toggle_cook(false)
 	if gift_open:
@@ -1404,6 +1469,16 @@ func _build_shop() -> void:
 	_sheep_btn = _mk_btn("")
 	_sheep_btn.pressed.connect(_buy_livestock.bind("sheep"))
 	sheep_row.add_child(_sheep_btn)
+	# 温室建造：玻璃房内无视季节，冬天也能种
+	var gh_row := HBoxContainer.new()
+	gh_row.add_theme_constant_override("separation", 8)
+	vb.add_child(gh_row)
+	var gh_l := _mk_label("建造温室（东侧玻璃房，冬天也能种植）", 14)
+	gh_l.custom_minimum_size = Vector2(250, 0)
+	gh_row.add_child(gh_l)
+	_gh_btn = _mk_btn("")
+	_gh_btn.pressed.connect(_buy_greenhouse)
+	gh_row.add_child(_gh_btn)
 	# 钓竿升级：铜钓竿
 	var rod_row := HBoxContainer.new()
 	rod_row.add_theme_constant_override("separation", 8)
@@ -1499,6 +1574,7 @@ func _sell(id: String, all: bool) -> void:
 	var n := have if all else 1
 	Game.add_gold(n * int(Game.CROPS[id].sell))
 	Game.remove_harvest(id, n)
+	_guide_advance(4)  # 新手引导：卖货
 	Sfx.play("coin")
 	_toast("卖出%s x%d，赚了 %d 金币" % [Game.CROPS[id].name, n, n * int(Game.CROPS[id].sell)])
 
@@ -1514,6 +1590,7 @@ func _sell_item(cat: Dictionary, id: String, all: bool) -> void:
 	var n := have if all else 1
 	Game.add_item(id, -n)
 	Game.add_gold(n * int(cat[id].sell))
+	_guide_advance(4)  # 新手引导：卖货
 	Sfx.play("coin")
 	_toast("卖出%s x%d，赚了 %d 金币" % [cat[id].name, n, n * int(cat[id].sell)])
 
@@ -2312,6 +2389,237 @@ func _refresh_orders() -> void:
 		_order_btns[i].disabled = o.done
 
 
+# ---------- 新手引导 · 七日目标 · 收集包 · 温室（新增系统） ----------
+
+## 顶部左侧引导条 + 今日目标行（首日五步引导，完成后自动隐藏）
+func _build_guide() -> void:
+	_guide_panel = PanelContainer.new()
+	_guide_panel.position = Vector2(20, 78)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.08, 0.12, 0.08, 0.78)
+	sb.border_color = Color(0.66, 0.84, 0.44, 0.8)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(8)
+	sb.content_margin_left = 10.0
+	sb.content_margin_right = 10.0
+	sb.content_margin_top = 3.0
+	sb.content_margin_bottom = 3.0
+	_guide_panel.add_theme_stylebox_override("panel", sb)
+	_guide_panel.visible = false
+	$UI.add_child(_guide_panel)
+	_guide_label = _mk_label("", 14)
+	_guide_panel.add_child(_guide_label)
+	# 今日目标行：单独底板保证在花草地面上也看得清
+	_goal_panel = PanelContainer.new()
+	_goal_panel.position = Vector2(20, 112)
+	var gsb := StyleBoxFlat.new()
+	gsb.bg_color = Color(0.08, 0.12, 0.08, 0.72)
+	gsb.border_color = Color(0.92, 0.8, 0.42, 0.65)
+	gsb.set_border_width_all(1)
+	gsb.set_corner_radius_all(6)
+	gsb.content_margin_left = 8.0
+	gsb.content_margin_right = 8.0
+	gsb.content_margin_top = 2.0
+	gsb.content_margin_bottom = 2.0
+	_goal_panel.add_theme_stylebox_override("panel", gsb)
+	$UI.add_child(_goal_panel)
+	_goal_label = _mk_label("", 13)
+	_goal_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.55))
+	_goal_panel.add_child(_goal_label)
+
+
+## 刷新引导条：已完成打 ✓，当前步 ▶，未到用 ·
+func _refresh_guide() -> void:
+	if _guide_panel == null:
+		return
+	if Game.guide_step >= Game.GUIDE_STEPS.size():
+		_guide_panel.visible = false
+		return
+	_guide_panel.visible = true
+	var parts: Array = []
+	for i in Game.GUIDE_STEPS.size():
+		var mark := "✓" if i < Game.guide_step else ("▶" if i == Game.guide_step else "·")
+		parts.append("%s%s" % [mark, Game.GUIDE_STEPS[i]])
+	_guide_label.text = "新手引导　" + "　".join(parts)
+
+
+## 推进引导：只有正好在做当前步骤才前进（锄地→浇水→播种→收获→卖货）
+func _guide_advance(step: int) -> void:
+	if Game.guide_step != step:
+		return
+	Game.guide_step = step + 1
+	if Game.guide_step >= Game.GUIDE_STEPS.size():
+		Game.add_gold(200)
+		Game.add_seed("parsnip", 3)
+		_toast("新手引导完成！奖励 200 金币 + 防风草种子 x3，按 B 看收集包")
+		_goal_check()
+	_refresh_guide()
+
+
+## 七日目标：逐日检查未领奖且已达标的阶段目标，自动发奖（错过可补领）
+func _goal_check() -> void:
+	for g in Game.DAY_GOALS:
+		var d := int(g.day)
+		if d > Game.day:
+			break
+		if Game.goals_claimed.has(d):
+			continue
+		if Game.goal_progress(String(g.kind)) >= int(g.n):
+			Game.goals_claimed[d] = true
+			Game.add_gold(int(g.gold))
+			Game.add_seed(String(g.seed), int(g.seed_n))
+			_toast("七日目标 · 第 %d 天「%s」达成！奖励 %d 金币 + %s种子 x%d" % [
+				d, String(g.name), int(g.gold), Game.CROPS[String(g.seed)].name, int(g.seed_n)])
+			Sfx.play("coin")
+	_goal_refresh()
+
+
+## 今日目标行：显示阶段目标与进度；当天已完成则预告下一条
+func _goal_refresh() -> void:
+	if _goal_label == null:
+		return
+	var done := Game.goals_claimed.size()
+	if done >= Game.DAY_GOALS.size():
+		_goal_label.text = "七日目标全部完成 · 农场稳步走上正轨！"
+		return
+	var g: Dictionary = Game.DAY_GOALS[clampi(Game.day, 1, 7) - 1]
+	var tag := "今日目标"
+	if Game.day > Game.DAY_GOALS.size():
+		# 7 天以后只提示还能补领的目标
+		tag = "可补领"
+		for gg in Game.DAY_GOALS:
+			if not Game.goals_claimed.has(int(gg.day)):
+				g = gg
+				break
+	elif Game.goals_claimed.has(int(g.day)):
+		tag = "下一目标"
+		for gg in Game.DAY_GOALS:
+			if not Game.goals_claimed.has(int(gg.day)):
+				g = gg
+				break
+	var cur: int = mini(Game.goal_progress(String(g.kind)), int(g.n))
+	_goal_label.text = "%s（第%d天）：%s　%d/%d" % [
+		tag, int(g.day), String(g.name), cur, int(g.n)]
+
+
+## 收集包面板：交齐作物/鱼/矿石/牧产，换金币与永久体力上限
+func _build_bundles() -> void:
+	_bundles_panel = PanelContainer.new()
+	_bundles_panel.anchor_left = 0.5
+	_bundles_panel.anchor_top = 0.5
+	_bundles_panel.anchor_right = 0.5
+	_bundles_panel.anchor_bottom = 0.5
+	_bundles_panel.offset_left = -310.0
+	_bundles_panel.offset_top = -150.0
+	_bundles_panel.offset_right = 310.0
+	_bundles_panel.offset_bottom = 160.0
+	_bundles_panel.visible = false
+	$UI.add_child(_bundles_panel)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 8)
+	_bundles_panel.add_child(vb)
+	vb.add_child(_mk_label("社区收集包", 20))
+	vb.add_child(_mk_label("交齐指定物资换金币 + 永久体力上限（B 键或「菜单」打开）", 13))
+	for id in Game.BUNDLES:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		vb.add_child(row)
+		var desc := _mk_label("", 14)
+		desc.custom_minimum_size = Vector2(440, 0)
+		row.add_child(desc)
+		_bundle_descs.append(desc)
+		var btn := _mk_btn("交付")
+		btn.pressed.connect(_deliver_bundle.bind(String(id)))
+		row.add_child(btn)
+		_bundle_btns.append(btn)
+	vb.add_child(_mk_label("作物从农田仓库扣，鱼/矿石/牧产从背包扣", 13))
+	vb.add_child(_mk_label("按 B / Esc 关闭", 12))
+
+
+func _toggle_bundles(open: bool) -> void:
+	if open:
+		_close_panels()
+	bundles_open = open
+	_bundles_panel.visible = open
+	if open:
+		_refresh_bundles()
+
+
+func _refresh_bundles() -> void:
+	if _bundles_panel == null or not bundles_open:
+		return
+	var keys: Array = Game.BUNDLES.keys()
+	for i in keys.size():
+		var id := String(keys[i])
+		var cfg: Dictionary = Game.BUNDLES[id]
+		var parts: Array = []
+		for need in cfg.need:
+			parts.append("%s %d/%d" % [Game.bundle_name(String(need[0]), String(need[1])),
+				mini(Game.bundle_stock(String(need[0]), String(need[1])), int(need[2])), int(need[2])])
+		var fin: bool = Game.bundles_done.has(id)
+		_bundle_descs[i].text = "%s　%s　→ %dg + 体力上限+%d%s" % [
+			String(cfg.name), "　".join(parts), int(cfg.gold), int(cfg.stamina),
+			"　[已完成]" if fin else ""]
+		_bundle_descs[i].add_theme_color_override("font_color",
+			Color(0.62, 0.58, 0.5) if fin else Color(1, 0.98, 0.92))
+		_bundle_btns[i].disabled = fin
+
+
+## 交付一个收集包：材料够才扣，奖金币并永久提高体力上限
+func _deliver_bundle(id: String) -> void:
+	if Net.is_guest():
+		_toast("联机时由房主交付收集包")
+		return
+	if Game.bundles_done.has(id):
+		return
+	var cfg: Dictionary = Game.BUNDLES[id]
+	var lack: Array = []
+	for need in cfg.need:
+		var have: int = Game.bundle_stock(String(need[0]), String(need[1]))
+		if have < int(need[2]):
+			lack.append("%s %d/%d" % [Game.bundle_name(String(need[0]), String(need[1])),
+				have, int(need[2])])
+	if not lack.is_empty():
+		_toast("还差：" + "、".join(lack))
+		return
+	for need in cfg.need:
+		if String(need[0]) == "crop":
+			Game.remove_harvest(String(need[1]), int(need[2]))
+		else:
+			Game.add_item(String(need[1]), -int(need[2]))
+	Game.bundles_done.append(id)
+	Game.add_gold(int(cfg.gold))
+	Game.max_stamina += float(cfg.stamina)
+	Game.stamina = minf(Game.stamina + float(cfg.stamina), Game.max_stamina)
+	Game.check_achievements()
+	Sfx.play("coin")
+	_toast("完成%s！奖励 %d 金币，体力上限永久 +%d" % [
+		String(cfg.name), int(cfg.gold), int(cfg.stamina)])
+	_refresh_bundles()
+
+
+## 建造温室：金币 + 木材石料，建成后东侧玻璃房内无视季节播种
+func _buy_greenhouse() -> void:
+	if Net.is_guest():
+		_toast("联机时由房主建造温室")
+		return
+	if Game.greenhouse_built:
+		return
+	if Game.gold < Game.GH_COST:
+		_toast("金币不足，建造温室需要 %d 金币" % Game.GH_COST)
+		return
+	if Game.items.get("wood", 0) < Game.GH_WOOD or Game.items.get("stone", 0) < Game.GH_STONE:
+		_toast("材料不足：需要木材 %d、石料 %d（8 斧镐敲树和石头）" % [Game.GH_WOOD, Game.GH_STONE])
+		return
+	Game.add_gold(-Game.GH_COST)
+	Game.add_item("wood", -Game.GH_WOOD)
+	Game.add_item("stone", -Game.GH_STONE)
+	Game.greenhouse_built = true
+	decor.set_greenhouse(true)
+	Sfx.play("coin")
+	_toast("温室建成了！东侧玻璃房里播种无视季节，冬天也能种")
+
+
 ## 每天随机 3 张订单（种类分布尽量打散，单类最多 2 张）
 func _gen_orders() -> void:
 	_orders.clear()
@@ -2719,12 +3027,14 @@ func _build_help() -> void:
 	])
 	_help_section(col_l, "种田流程", [
 		"1 锄头开垦 → 3~6/9/0 播种 → 2 浇水 → 每天浇水才生长 → 成熟后空格收获",
+		"首日跟着屏幕左侧「新手引导」做：锄地→浇水→播种→收获→卖货，完成奖 200g + 种子",
 		"玉米/蓝莓收获后不拔根，过几天会再次结果；蓝莓一次结两颗",
 		"对着货摊按 E 开商店：买种子、卖作物和鱼、升级工具",
 	])
 	_help_section(col_l, "四季轮作（新增）", [
 		"每季 14 天轮换春夏秋冬：春萝卜土豆草莓 / 夏草莓玉米蓝莓 / 秋南瓜玉米蓝莓",
 		"冬季休耕不能播种（已种的继续长），改为钓鱼、挖矿、加工与节日为主",
+		"商店可建温室（东侧玻璃房）：温室内无视季节，冬天也能种任何作物",
 		"换季地面与树木随之变色，冬天下雪；雨天自动浇灌农田、鱼更容易上钩",
 	])
 	_help_section(col_l, "钓鱼（7 鱼竿）", [
@@ -2763,6 +3073,8 @@ func _build_help() -> void:
 	_help_section(col_r, "订单与养殖", [
 		"货摊旁任务板按 E 接订单：每天 3 张，交作物/鱼/材料得金币与好感",
 		"养鸡 800g/只（最多4）每天下蛋；奶牛 2500g、绵羊 2000g 住畜棚产奶产毛",
+		"七天阶段目标显示在左上「今日目标」，达成自动发金币与对应季节种子",
+		"B 打开收集包：交作物/鱼/矿石/牧产换金币 + 永久体力上限",
 	])
 	_help_section(col_r, "图鉴·技能·存档（G）", [
 		"按 G 打开面板：技能等级、6 种鱼类图鉴（含鱼王）、宝箱与成就进度",
@@ -3217,6 +3529,11 @@ func _refresh_hud() -> void:
 	if _rod_btn:
 		_rod_btn.text = "铜钓竿 1800g+铜x5" if Game.rod_lv == 1 else "已满级"
 		_rod_btn.disabled = Game.rod_lv >= 2
+	# 温室建造按钮
+	if _gh_btn:
+		_gh_btn.text = "温室已建成" if Game.greenhouse_built \
+				else "建温室 %dg+木%d+石%d" % [Game.GH_COST, Game.GH_WOOD, Game.GH_STONE]
+		_gh_btn.disabled = Game.greenhouse_built
 	# 领养宠物按钮（在 _build_shop 后才有）
 	if not _pet_btns.is_empty():
 		for pk in _pet_btns:
@@ -3248,6 +3565,9 @@ func _refresh_hud() -> void:
 		var stock: int = _stock_of(gid)
 		(_gift_rows[gid][0] as Label).text = "持有 x%d" % stock
 		(_gift_rows[gid][1] as Button).disabled = stock <= 0
+	# 收集包面板行
+	if bundles_open:
+		_refresh_bundles()
 
 
 func _update_hint() -> void:
@@ -3291,6 +3611,8 @@ func _update_hint() -> void:
 			txt = "%s正在加工%s，明早完工" % [Game.RECIPES[md.type].name, _item_name(md.input)]
 		else:
 			txt = "按 E 往%s里放原料（%s）" % [Game.RECIPES[md.type].name, _machine_input_names(md.type)]
+	elif Game.greenhouse_built and farm.GH_ZONE.grow(40.0).has_point(player.position):
+		txt = "温室里无视季节：锄地(1) → 播种 → 浇水(2)，冬天也能种植"
 	elif decor.MINE_ZONE.has_point(player.position):
 		txt = "矿洞区：8 斧镐敲矿岩，可得铜矿/铁矿/宝石"
 	elif gather.near_bush(player.position):
@@ -3490,6 +3812,8 @@ func _apply_season_tint() -> void:
 		sp.modulate = tint
 	# 冬天地表细节（树/屋顶）微微泛冷白
 	decor.modulate = Color(0.92, 0.96, 1.04) if win else Color(1, 1, 1)
+	# 四季飘落物：春花瓣 / 秋落叶 / 冬雪
+	decor.set_season(Game.season_index())
 
 
 ## 隔天天气：冬季可能下雪，其余季节 30% 下雨
@@ -3965,6 +4289,9 @@ func _start_new_game() -> void:
 	_gifted_today.clear()
 	_last_season = Game.season_index()
 	_apply_season_tint()
+	decor.set_greenhouse(false)
+	_refresh_guide()
+	_goal_refresh()
 	_refresh_festival()
 	_refresh_hud()
 	player.position = decor.DOOR_POS + Vector2(0, 44)

@@ -81,6 +81,8 @@ const WOOL_SPOTS := [
 ## 东侧矿洞：入口拱门与矿岩刷新区
 const MINE_POS := Vector2(1480, 240)
 const MINE_ZONE := Rect2(1240, 60, 460, 400)
+## 额外路灯（屋旁与农田边），夜里和主路灯一起亮
+const EXTRA_LAMPS := [Vector2(-600, -376), Vector2(300, -300)]
 const MUSHROOM_POS := [
 	Vector2(-1090, 320), Vector2(-1180, 760), Vector2(1120, 480),
 	Vector2(1560, -820), Vector2(-1560, -620), Vector2(1340, 900),
@@ -122,6 +124,11 @@ const FIREFLY_BASE := [
 	Vector2(600, 20), Vector2(690, 90), Vector2(750, -30), Vector2(500, 70),
 	Vector2(860, 40), Vector2(620, 140), Vector2(770, 120), Vector2(470, -30),
 ]
+## 池塘水面碎光起点（波光闪烁用）
+const SPARKLE_BASE := [
+	Vector2(600, 30), Vector2(660, -20), Vector2(720, 60),
+	Vector2(770, 10), Vector2(620, 100), Vector2(700, 130),
+]
 
 ## 白天氛围：蝴蝶活动点（花田与野花丛）/ 云影初始位置
 const BUTTERFLY_SPOTS := [
@@ -137,10 +144,21 @@ var _stones: Array[Vector2] = []
 var _wt := 0.0
 var _glow_window: Sprite2D
 var _glow_lamp: Sprite2D
+var _glow_coop: Sprite2D
+var _glow_barn: Sprite2D
 var _fireflies: Array[Sprite2D] = []
 var _butterflies: Array[Sprite2D] = []
 var _clouds: Array[Sprite2D] = []
 var _bunting: Sprite2D
+# 四季飘落物：春花瓣 / 秋落叶（复用树叶粒子）/ 冬雪
+var _petals: CPUParticles2D
+var _snow: CPUParticles2D
+var _leaf_emitters: Array[CPUParticles2D] = []
+var _sparkles: Array[Sprite2D] = []
+var _season := 0
+# 温室：建成后绘制玻璃房并挡墙（脚本创建，读档后由 main 调用 set_greenhouse 恢复）
+var _gh_built := false
+var _gh_bodies: Array = []
 
 
 func _ready() -> void:
@@ -200,14 +218,20 @@ func _ready() -> void:
 		_add_sprite(TEX_FLOWERS, fp, Rect2((i % 4) * 16, 0, 16, 16))
 	# 草丛与石子散布（避开农田/池塘/建筑/新区兴趣点）
 	_scatter_detail()
-	# 夜景：路灯、窗户灯光、萤火虫、炊烟
+	# 夜景：路灯、房屋/鸡舍/畜棚窗户灯光、萤火虫、炊烟
 	_add_sprite(TEX_LAMP, LAMP_POS)
 	_glow_lamp = _add_glow(LAMP_POS + Vector2(0, -12), 1.4)
+	for p in EXTRA_LAMPS:
+		_add_sprite(TEX_LAMP, p)
+		_add_glow(p + Vector2(0, -12), 1.1)
 	_glow_window = _add_glow(Vector2(-722, -468), 2.0)
+	_glow_coop = _add_glow(COOP_POS + Vector2(-6, -14), 1.1)
+	_glow_barn = _add_glow(BARN_POS + Vector2(6, -8), 1.3)
 	for b in FIREFLY_BASE:
-		var f := _add_sprite(TEX_GLOW_S, b)
+		var f := _add_sprite(TEX_GLOW, b)
 		f.material = _add_material()
-		f.modulate.a = 0.0
+		f.scale = Vector2(0.4, 0.4)
+		f.modulate = Color(0.85, 1.0, 0.5, 0.0)  # 黄绿色萤火
 		_fireflies.append(f)
 	_setup_smoke()
 	_setup_ambience()
@@ -216,6 +240,8 @@ func _ready() -> void:
 	_add_blocker_rect(STALL_RECT)
 	_add_blocker_rect(POND_RECT)
 	_add_blocker_circle(LAMP_POS, 6.0)
+	for p in EXTRA_LAMPS:
+		_add_blocker_circle(p, 6.0)
 	_add_blocker_circle(BOARD_POS, 9.0)
 	_add_blocker_circle(COOP_POS, 20.0)
 	_add_blocker_circle(MINE_POS + Vector2(0, 6), 24.0)
@@ -243,22 +269,33 @@ func _process(delta: float) -> void:
 	# 夜晚因子（从环境色调亮度推算）→ 灯光与萤火虫
 	var lum: float = get_node("../CanvasModulate").color.get_luminance()
 	var night := clampf((0.75 - lum) / 0.4, 0.0, 1.0)
-	_glow_window.modulate.a = night * 0.9
-	_glow_lamp.modulate.a = night * 0.9
+	# 窗户灯光轻微呼吸闪烁，比恒定亮着更像有人住
+	var flick := 0.86 + 0.1 * sin(_wt * 2.3) + 0.04 * sin(_wt * 7.1)
+	_glow_window.modulate.a = night * 0.95 * flick
+	_glow_lamp.modulate.a = night * 0.9 * flick
+	_glow_coop.modulate.a = night * 0.8 * flick
+	_glow_barn.modulate.a = night * 0.8 * flick
 	for i in _fireflies.size():
 		var f := _fireflies[i]
 		var b: Vector2 = FIREFLY_BASE[i]
 		f.position = b + Vector2(sin(_wt * 0.7 + i * 1.9) * 26.0, cos(_wt * 0.53 + i * 1.3) * 18.0)
-		f.modulate.a = night * (0.35 + 0.4 * (0.5 + 0.5 * sin(_wt * 2.2 + i)))
-	# 白天氛围：蝴蝶飞舞（入夜淡出）与云影缓慢漂移
+		f.modulate.a = night * (0.5 + 0.42 * (0.5 + 0.5 * sin(_wt * 2.2 + i)))
+	# 白天氛围：蝴蝶飞舞（入夜淡出，秋冬变少）与云影缓慢漂移
 	var day_a := clampf(1.0 - night * 1.6, 0.0, 1.0)
+	var bfly := day_a * (1.0 if _season <= 1 else (0.45 if _season == 2 else 0.0))
 	for i in _butterflies.size():
 		var b := _butterflies[i]
 		var t := _wt * (0.5 + 0.12 * i) + i * 2.13
 		b.position = BUTTERFLY_SPOTS[i] + Vector2(sin(t) * 54.0, cos(t * 0.77) * 30.0)
 		b.frame = int(_wt * 10.0 + i * 1.7) % 2
 		b.flip_h = sin(t * 0.9) < 0.0
-		b.modulate.a = day_a
+		b.modulate.a = bfly
+	# 水面波光：池塘上的碎光缓缓漂移、明暗交替
+	for i in _sparkles.size():
+		var sk := _sparkles[i]
+		var st := _wt * 1.5 + i * 2.4
+		sk.position = SPARKLE_BASE[i] + Vector2(sin(st * 0.6) * 11.0, cos(st * 0.45) * 7.0)
+		sk.modulate.a = day_a * (0.24 + 0.42 * maxf(0.0, sin(st * 1.7)))
 	for i in _clouds.size():
 		var c := _clouds[i]
 		c.position.x += delta * (9.0 + i * 2.5)
@@ -270,6 +307,43 @@ func _process(delta: float) -> void:
 func set_festival(on: bool) -> void:
 	if _bunting:
 		_bunting.visible = on
+
+
+## 季节氛围切换：春花瓣 / 秋落叶 / 冬雪各自显隐（main 换季时调用）
+func set_season(i: int) -> void:
+	_season = clampi(i, 0, 3)
+	if _petals:
+		_petals.emitting = _season == 0
+		_petals.visible = _season == 0
+		if _season == 0:
+			_petals.restart()
+	for p in _leaf_emitters:
+		p.emitting = _season == 2
+		p.visible = _season == 2
+		if _season == 2:
+			p.restart()
+	if _snow:
+		_snow.emitting = _season == 3
+		_snow.visible = _season == 3
+		if _season == 3:
+			_snow.restart()
+
+
+## 温室建成开关：开启后绘制玻璃房并挡住四壁（下方留门口）
+func set_greenhouse(on: bool) -> void:
+	_gh_built = on
+	for b in _gh_bodies:
+		if is_instance_valid(b):
+			b.queue_free()
+	_gh_bodies.clear()
+	if on:
+		var r: Rect2 = FARM.GH_RECT
+		_gh_bodies.append(_add_blocker_rect(Rect2(r.position.x, r.position.y, r.size.x, 8)))
+		_gh_bodies.append(_add_blocker_rect(Rect2(r.position.x, r.end.y - 8, 118, 8)))
+		_gh_bodies.append(_add_blocker_rect(Rect2(r.position.x + 162, r.end.y - 8, 118, 8)))
+		_gh_bodies.append(_add_blocker_rect(Rect2(r.position.x, r.position.y, 8, r.size.y)))
+		_gh_bodies.append(_add_blocker_rect(Rect2(r.end.x - 8, r.position.y, 8, r.size.y)))
+	queue_redraw()
 
 
 func _scatter_detail() -> void:
@@ -291,6 +365,8 @@ func _scatter_detail() -> void:
 				or p.distance_to(COOP_POS) < 70:
 			blocked = true
 		if MINE_ZONE.grow(14).has_point(p):
+			blocked = true
+		if FARM.GH_RECT.grow(12).has_point(p):
 			blocked = true
 		for b in BUSH_SPOTS:
 			if p.distance_to(b) < 56:
@@ -331,6 +407,46 @@ func _setup_ambience() -> void:
 		_butterflies.append(b)
 	for i in range(0, TREES.size(), 2):
 		_add_leaf_rain(TREES[i] + Vector2(0, -30))
+	# 四季飘落物：春花瓣（粉色）/ 冬雪（浅蓝白，避免雪地白上看不见），秋叶由树冠落叶承担
+	_petals = _make_fall_particles(TEX_LEAF, Color(1.0, 0.87, 0.94), 200, 9.0, 16.0, 1.2, 2.0)
+	_snow = _make_fall_particles(TEX_GLOW_S, Color(0.55, 0.68, 0.94), 300, 9.0, 26.0, 1.6, 2.6)
+	# 池塘水面碎光（白天闪烁）
+	for p in SPARKLE_BASE:
+		var sk := _add_sprite(TEX_GLOW, p)
+		sk.material = _add_material()
+		sk.scale = Vector2(0.26, 0.17)
+		sk.modulate.a = 0.0
+		_sparkles.append(sk)
+
+
+## 全地图范围的飘落粒子（春花瓣 / 冬雪共用），默认不发射，由 set_season 开关
+func _make_fall_particles(tex: Texture2D, col: Color, amount: int, life: float,
+		fall: float, smin: float, smax: float) -> CPUParticles2D:
+	var p := CPUParticles2D.new()
+	p.texture = tex
+	p.amount = amount
+	p.lifetime = life
+	p.preprocess = life
+	p.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	p.emission_rect_extents = Vector2(1860, 1260)
+	p.direction = Vector2(0.12, 1)
+	p.spread = 15.0
+	p.gravity = Vector2(0, fall)
+	p.initial_velocity_min = 4.0
+	p.initial_velocity_max = 12.0
+	p.angular_velocity_min = -70.0
+	p.angular_velocity_max = 70.0
+	p.scale_amount_min = smin
+	p.scale_amount_max = smax
+	p.color = col
+	var g := Gradient.new()
+	g.set_color(0, Color(1, 1, 1, 0.95))
+	g.set_color(1, Color(1, 1, 1, 0))
+	p.color_ramp = g
+	p.z_index = 3
+	p.emitting = false
+	add_child(p)
+	return p
 
 
 ## 树冠飘落树叶（随机秋叶色、旋转飘落、落地图形淡出）
@@ -363,6 +479,7 @@ func _add_leaf_rain(pos: Vector2) -> void:
 	p.color_ramp = g
 	p.emitting = true
 	add_child(p)
+	_leaf_emitters.append(p)
 
 
 func _add_material() -> CanvasItemMaterial:
@@ -411,7 +528,7 @@ func _add_sprite(tex: Texture2D, pos: Vector2, region := Rect2()) -> Sprite2D:
 	return s
 
 
-func _add_blocker_rect(r: Rect2) -> void:
+func _add_blocker_rect(r: Rect2) -> StaticBody2D:
 	var body := StaticBody2D.new()
 	var cs := CollisionShape2D.new()
 	var shape := RectangleShape2D.new()
@@ -420,6 +537,7 @@ func _add_blocker_rect(r: Rect2) -> void:
 	body.position = r.get_center()
 	body.add_child(cs)
 	add_child(body)
+	return body
 
 
 func _add_blocker_circle(pos: Vector2, radius: float) -> void:
@@ -438,6 +556,7 @@ func _draw() -> void:
 	for z in FARM.ZONES:
 		_draw_fence(z)
 	_draw_fence(GARDEN_RECT)
+	_draw_greenhouse()
 	_draw_path()
 	draw_texture_rect(TEX_HOUSE, Rect2(-784, -594, 248, 184), false)
 	draw_texture_rect(TEX_STALL, Rect2(STALL_RECT.position, STALL_RECT.size), false)
@@ -448,6 +567,35 @@ func _draw() -> void:
 			"皮埃尔种子商店", HORIZONTAL_ALIGNMENT_CENTER, sign_rect.size.x, 16, 4, Color(0.1, 0.07, 0.05))
 	draw_string(sign_font, Vector2(sign_rect.position.x, sign_rect.position.y + 19),
 			"皮埃尔种子商店", HORIZONTAL_ALIGNMENT_CENTER, sign_rect.size.x, 16, Color(0.24, 0.16, 0.1))
+
+
+## 温室外观：半透明玻璃 + 木框 + 屋顶斜梁，建成后才绘制
+func _draw_greenhouse() -> void:
+	if not _gh_built:
+		return
+	var r: Rect2 = FARM.GH_RECT
+	var wood := Color(0.44, 0.32, 0.2)
+	draw_rect(r, Color(0.55, 0.85, 0.78, 0.18))
+	# 内部苗床底色（未开垦时也像土床，开垦后农田格会盖在上面）
+	draw_rect(FARM.GH_ZONE, Color(0.42, 0.31, 0.2, 0.85))
+	var x := r.position.x + 24.0
+	while x < r.end.x - 8.0:
+		draw_line(Vector2(x, r.position.y + 8.0), Vector2(x, r.end.y - 10.0),
+				Color(0.78, 0.96, 0.9, 0.22), 2.0)
+		x += 30.0
+	draw_rect(Rect2(r.position, Vector2(r.size.x, 8.0)), wood)
+	# 底边留门口（与碰撞缺口对齐）
+	draw_rect(Rect2(r.position.x, r.end.y - 8.0, 118.0, 8.0), wood)
+	draw_rect(Rect2(r.position.x + 162.0, r.end.y - 8.0, 118.0, 8.0), wood)
+	draw_rect(Rect2(r.position.x, r.position.y, 8.0, r.size.y), wood)
+	draw_rect(Rect2(r.end.x - 8.0, r.position.y, 8.0, r.size.y), wood)
+	draw_line(Vector2(r.position.x, r.position.y + 10.0),
+			Vector2(r.get_center().x, r.position.y - 16.0), wood, 4.0)
+	draw_line(Vector2(r.get_center().x, r.position.y - 16.0),
+			Vector2(r.end.x, r.position.y + 10.0), wood, 4.0)
+	# 招牌画在玻璃顶内侧，避免被画面上沿裁掉
+	draw_string(sign_font, Vector2(r.get_center().x - 60.0, r.position.y + 34.0),
+			"温 室", HORIZONTAL_ALIGNMENT_CENTER, 120, 16, Color(0.2, 0.13, 0.07))
 
 
 func _draw_fence(r: Rect2) -> void:

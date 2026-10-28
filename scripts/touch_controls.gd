@@ -68,7 +68,7 @@ func _build_menu() -> void:
 	vb.add_theme_constant_override("separation", 6)
 	_menu.add_child(vb)
 	for item in [
-		["制作", "craft"], ["图鉴", "codex"], ["帮助", "help"],
+		["制作", "craft"], ["图鉴", "codex"], ["收集包", "bundle"], ["帮助", "help"],
 		["聊天", "chat"], ["地图", "minimap"], ["存档", "save_game"],
 		["读档", "load_game"],
 	]:
@@ -137,7 +137,7 @@ func refresh_mode() -> void:
 func _blocked() -> bool:
 	return get_tree().paused or main.sleeping or main._chat_open \
 			or main.settings_open or main.help_open or main.dex_open \
-			or main.orders_open or main.shop_open or main.craft_open \
+			or main.orders_open or main.bundles_open or main.shop_open or main.craft_open \
 			or main.cook_open or main.gift_open or main.dialog_open \
 			or main._boot_panel != null
 

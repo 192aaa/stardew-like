@@ -22,6 +22,10 @@ const ZONES := [
 	Rect2(-520, 260, 220, 120),
 	Rect2(180, 240, 250, 120),
 ]
+## 温室：GH_RECT 为玻璃建筑外框（decor 绘制），GH_ZONE 为内部可种植区
+## 建成后温室内无视季节限制（冬天也能播种），由 Game.greenhouse_built 控制
+const GH_RECT := Rect2(1120, -600, 280, 200)
+const GH_ZONE := Rect2(1140, -584, 240, 140)
 
 ## 全局格坐标 -> {tilled, watered, crop, stage, wtoday}
 var tiles := {}
@@ -40,10 +44,19 @@ var _preview_valid := false
 
 
 func zone_at(p: Vector2) -> bool:
+	if Game.greenhouse_built and GH_ZONE.has_point(p):
+		return true
 	for z in ZONES:
 		if z.has_point(p):
 			return true
 	return false
+
+
+## 该格是否在温室内（播种时跳过季节校验）
+func in_greenhouse(c: Vector2i) -> bool:
+	if not Game.greenhouse_built:
+		return false
+	return GH_ZONE.has_point(Vector2(c.x * CELL + 16, c.y * CELL + 16))
 
 
 ## 返回 Vector2i 或 null（不在农田内）
@@ -107,7 +120,8 @@ func try_plant(c: Vector2i, id: String) -> String:
 		return "先用锄头开垦这块地"
 	if tiles[c].crop != "":
 		return "这里已经种了作物"
-	if not Game.can_plant(id):
+	# 温室内无视季节：冬天也能种任何作物
+	if not Game.can_plant_in(in_greenhouse(c), id):
 		var ss := Game.crop_seasons(id)
 		if ss == "":
 			return "%s季不能种地（冬天休耕，去钓鱼或挖矿吧）" % Game.season_name()
