@@ -242,6 +242,20 @@ var _chat_log: VBoxContainer
 var _chat_input: LineEdit
 var _chat_open := false
 
+# 设置面板（音乐/音效/触屏按钮/UI 缩放/全屏），配置由 Save 持久化
+var settings_open := false
+var _settings_panel: PanelContainer
+var _settings_dim: ColorRect
+var _set_music_btn: Button
+var _set_sfx_btn: Button
+var _set_touch_btn: Button
+var _set_scale_btn: Button
+var _set_fs_btn: Button
+var _set_music_slider: HSlider
+var _set_sfx_slider: HSlider
+var _set_music_pct: Label
+var _set_sfx_pct: Label
+
 
 func _ready() -> void:
 	_ui_font = SystemFont.new()
@@ -297,6 +311,9 @@ func _ready() -> void:
 	Net.peer_joined.connect(_on_peer_joined)
 	Net.peer_left.connect(_on_peer_left)
 	_build_boot()
+	_build_settings()
+	_apply_settings()
+	get_viewport().size_changed.connect(_apply_ui_scale)
 
 
 func _process(delta: float) -> void:
@@ -354,6 +371,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		_switch_tool(Tool.SEED_BLUE)
 	elif event.is_action_pressed("mute"):
 		var m: bool = Music.toggle_mute()
+		Save.set_setting("music_on", not m)  # 与设置面板共用同一状态并落盘
+		if settings_open:
+			_refresh_settings_ui()
 		_toast("背景音乐已%s（M 切换）" % ("开启" if not m else "关闭"))
 	elif event.is_action_pressed("codex"):
 		_toggle_dex(not dex_open)
@@ -377,6 +397,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not sleeping and not Net.is_guest():
 			_do_load()
 	elif event.is_action_pressed("use"):
+		if settings_open:
+			return
 		if help_open:
 			_toggle_help(false)
 		elif dex_open:
@@ -405,6 +427,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("ui_cancel"):
 		if _chat_open:
 			_chat_close()
+		elif settings_open:
+			_toggle_settings(false)
 		elif help_open:
 			_toggle_help(false)
 		elif dex_open:
@@ -423,10 +447,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_dialog(false)
 		elif place_mode != "":
 			_cancel_place()
+		else:
+			_toggle_settings(true)
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT \
 			and event.pressed and not shop_open and not craft_open \
 			and not orders_open and not dex_open and place_mode == "" \
-			and not cook_open and not gift_open:
+			and not cook_open and not gift_open and not settings_open:
 		_use_tool()
 
 
@@ -1232,6 +1258,8 @@ func _do_sleep(passed_out: bool) -> void:
 
 ## 关闭所有已打开的面板（睡觉/联机读档前调用）
 func _close_panels() -> void:
+	if settings_open:
+		_toggle_settings(false)
 	if shop_open:
 		_toggle_shop(false)
 	if craft_open:
@@ -2666,7 +2694,7 @@ func _build_help() -> void:
 	col_l.add_child(title)
 	_help_section(col_l, "基础操作", [
 		"WASD / 方向键 移动　　空格 / 鼠标左键 使用工具　　E 互动",
-		"1-0 切换工具　　C 制作　　H 帮助　　Esc 关闭　　F5 存档 / F9 读档　　M 音乐",
+		"1-0 切换工具　　C 制作　　H 帮助　　Esc 设置 / 关闭　　F5 存档 / F9 读档　　M 音乐",
 		"Tab 小地图放大缩小　　T 和联机好友打字聊天",
 	])
 	_help_section(col_l, "种田流程", [
@@ -2738,6 +2766,254 @@ func _help_section(vb: VBoxContainer, title: String, lines: Array) -> void:
 func _toggle_help(open: bool) -> void:
 	help_open = open
 	help_panel.visible = open
+
+
+# ---------- 设置面板 ----------
+
+## 设置面板：音乐/音效开关与音量、触屏按钮、界面缩放、全屏、返回
+func _build_settings() -> void:
+	# 半透明黑色遮罩：压暗背后画面、挡住点击穿透（鼠标事件由它吸收）
+	_settings_dim = ColorRect.new()
+	_settings_dim.process_mode = Node.PROCESS_MODE_ALWAYS
+	_settings_dim.anchor_right = 1.0
+	_settings_dim.anchor_bottom = 1.0
+	_settings_dim.color = Color(0.04, 0.03, 0.02, 0.92)
+	_settings_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_settings_dim.visible = false
+	$UI.add_child(_settings_dim)
+	_settings_panel = PanelContainer.new()
+	_settings_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	_settings_panel.anchor_left = 0.5
+	_settings_panel.anchor_top = 0.5
+	_settings_panel.anchor_right = 0.5
+	_settings_panel.anchor_bottom = 0.5
+	_settings_panel.offset_left = -250.0
+	_settings_panel.offset_top = -212.0
+	_settings_panel.offset_right = 250.0
+	_settings_panel.offset_bottom = 212.0
+	_settings_panel.visible = false
+	# 实色底板：设置面板盖在压暗的场景/标题之上，避免下层文字透出来
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.13, 0.1, 0.08, 0.98)
+	sb.border_color = Color(0.36, 0.28, 0.2)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(8)
+	sb.content_margin_left = 16.0
+	sb.content_margin_right = 16.0
+	sb.content_margin_top = 14.0
+	sb.content_margin_bottom = 14.0
+	_settings_panel.add_theme_stylebox_override("panel", sb)
+	$UI.add_child(_settings_panel)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 9)
+	_settings_panel.add_child(vb)
+	var pad := Control.new()
+	pad.custom_minimum_size = Vector2(460, 0)
+	vb.add_child(pad)
+	var title := _mk_label("设 置", 24)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(title)
+	vb.add_child(HSeparator.new())
+	# 音乐
+	var row_m := _settings_row(vb, "音乐")
+	_set_music_btn = _mk_btn("开启")
+	_set_music_btn.custom_minimum_size = Vector2(110, 32)
+	_set_music_btn.pressed.connect(_on_music_toggle)
+	row_m.add_child(_set_music_btn)
+	var pair_m := _settings_slider(vb, _on_music_volume)
+	_set_music_slider = pair_m[0]
+	_set_music_pct = pair_m[1]
+	# 音效
+	var row_s := _settings_row(vb, "音效")
+	_set_sfx_btn = _mk_btn("开启")
+	_set_sfx_btn.custom_minimum_size = Vector2(110, 32)
+	_set_sfx_btn.pressed.connect(_on_sfx_toggle)
+	row_s.add_child(_set_sfx_btn)
+	var pair_s := _settings_slider(vb, _on_sfx_volume)
+	_set_sfx_slider = pair_s[0]
+	_set_sfx_pct = pair_s[1]
+	vb.add_child(HSeparator.new())
+	# 触屏按钮 / 界面缩放 / 全屏
+	var row_t := _settings_row(vb, "触屏按钮")
+	_set_touch_btn = _mk_btn("自动")
+	_set_touch_btn.custom_minimum_size = Vector2(110, 32)
+	_set_touch_btn.pressed.connect(_on_touch_cycle)
+	row_t.add_child(_set_touch_btn)
+	var row_c := _settings_row(vb, "界面缩放")
+	_set_scale_btn = _mk_btn("100%")
+	_set_scale_btn.custom_minimum_size = Vector2(110, 32)
+	_set_scale_btn.pressed.connect(_on_scale_cycle)
+	row_c.add_child(_set_scale_btn)
+	var row_f := _settings_row(vb, "全屏显示")
+	_set_fs_btn = _mk_btn("进入全屏")
+	_set_fs_btn.custom_minimum_size = Vector2(110, 32)
+	_set_fs_btn.pressed.connect(_on_fullscreen_toggle)
+	row_f.add_child(_set_fs_btn)
+	var tip := _mk_label("Esc 随时打开或关闭设置 · 手机上触屏按钮会自动出现", 12)
+	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tip.custom_minimum_size = Vector2(460, 0)
+	tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip.modulate = Color(1, 1, 1, 0.66)
+	vb.add_child(tip)
+	var back := _mk_btn("返 回")
+	back.custom_minimum_size = Vector2(0, 40)
+	back.pressed.connect(func() -> void: _toggle_settings(false))
+	vb.add_child(back)
+
+
+## 一行设置项：左侧标题 + 右侧按钮（返回容器供调用方追加控件）
+func _settings_row(vb: VBoxContainer, title: String) -> HBoxContainer:
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	vb.add_child(h)
+	var l := _mk_label(title, 16)
+	l.custom_minimum_size = Vector2(120, 0)
+	h.add_child(l)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(spacer)
+	return h
+
+
+## 音量滑条 + 百分比文字，返回 [HSlider, Label]
+func _settings_slider(vb: VBoxContainer, on_change: Callable) -> Array:
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	vb.add_child(h)
+	var s := HSlider.new()
+	s.min_value = 0.0
+	s.max_value = 100.0
+	s.step = 5.0
+	s.custom_minimum_size = Vector2(0, 22)
+	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(s)
+	var pct := _mk_label("100%", 13)
+	pct.custom_minimum_size = Vector2(56, 0)
+	pct.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	h.add_child(pct)
+	s.value_changed.connect(on_change)
+	return [s, pct]
+
+
+func _toggle_settings(open: bool) -> void:
+	if open and not settings_open:
+		# 打开前先收起其它面板（此刻 settings_open 仍为 false，_close_panels 不会误关自己）
+		_close_panels()
+	settings_open = open
+	if _settings_dim != null:
+		_settings_dim.visible = open
+	if _settings_panel != null:
+		_settings_panel.visible = open
+	if open:
+		_refresh_settings_ui()
+
+
+## 把面板上的按钮/滑条状态刷成当前实际配置
+func _refresh_settings_ui() -> void:
+	if _settings_panel == null:
+		return
+	_set_music_btn.text = "关闭" if Music.muted else "开启"
+	_set_sfx_btn.text = "开启" if _sfx_on() else "关闭"
+	var mv := int(roundf(Music.volume * 100.0))
+	var sv := int(roundf(float(Save.setting("sfx_vol", 1.0)) * 100.0))
+	_set_music_slider.set_value_no_signal(mv)
+	_set_music_pct.text = "%d%%" % mv
+	_set_sfx_slider.set_value_no_signal(sv)
+	_set_sfx_pct.text = "%d%%" % sv
+	_set_touch_btn.text = _touch_label()
+	_set_scale_btn.text = "%d%%" % int(roundf(float(Save.setting("ui_scale", 1.0)) * 100.0))
+	var fs: bool = DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
+	_set_fs_btn.text = "退出全屏" if fs else "进入全屏"
+
+
+## 启动时把已保存的配置应用到各系统
+func _apply_settings() -> void:
+	Music.volume = clampf(float(Save.setting("music_vol", 1.0)), 0.0, 1.0)
+	Music.set_muted(not bool(Save.setting("music_on", false)))
+	Music.apply_volume()
+	_sfx_apply()
+	_apply_ui_scale()
+
+
+## 音效：开关决定是否出声，滑条数值单独记住（关掉再开音量不丢）
+func _sfx_on() -> bool:
+	return bool(Save.setting("sfx_on", true))
+
+
+func _sfx_apply() -> void:
+	var v := clampf(float(Save.setting("sfx_vol", 1.0)), 0.0, 1.0)
+	Sfx.volume = v if _sfx_on() else 0.0
+
+
+func _on_music_toggle() -> void:
+	var on := not bool(Save.setting("music_on", false))
+	Save.set_setting("music_on", on)
+	Music.set_muted(not on)
+	_refresh_settings_ui()
+
+
+func _on_music_volume(v: float) -> void:
+	Music.volume = clampf(v / 100.0, 0.0, 1.0)
+	Save.set_setting("music_vol", Music.volume)
+	Music.apply_volume()
+	_set_music_pct.text = "%d%%" % int(v)
+
+
+func _on_sfx_toggle() -> void:
+	var on := not _sfx_on()
+	Save.set_setting("sfx_on", on)
+	_sfx_apply()
+	_refresh_settings_ui()
+	if on:
+		Sfx.play("coin", -8.0)  # 开启时给一声试听
+
+
+func _on_sfx_volume(v: float) -> void:
+	Save.set_setting("sfx_vol", clampf(v / 100.0, 0.0, 1.0))
+	_sfx_apply()
+	_set_sfx_pct.text = "%d%%" % int(v)
+	Sfx.play("pick", -10.0)  # 拖动时试听（静音时 play 内部会直接返回）
+
+
+func _touch_label() -> String:
+	var mode := String(Save.setting("touch_buttons", "auto"))
+	if mode == "on":
+		return "强制开"
+	if mode == "off":
+		return "关闭"
+	return "自动"
+
+
+## 触屏按钮三态：自动（按设备检测）→ 强制开 → 关闭
+func _on_touch_cycle() -> void:
+	var cur := String(Save.setting("touch_buttons", "auto"))
+	var next := "on" if cur == "auto" else ("off" if cur == "on" else "auto")
+	Save.set_setting("touch_buttons", next)
+	_refresh_settings_ui()
+
+
+## 界面缩放三档：100% → 115% → 130%（只放大 UI 层，世界画面不变）
+func _on_scale_cycle() -> void:
+	var cur := float(Save.setting("ui_scale", 1.0))
+	var next := 1.15 if cur < 1.05 else (1.3 if cur < 1.25 else 1.0)
+	Save.set_setting("ui_scale", next)
+	_apply_ui_scale()
+	_refresh_settings_ui()
+
+
+func _apply_ui_scale() -> void:
+	var s := clampf(float(Save.setting("ui_scale", 1.0)), 1.0, 1.3)
+	var center := get_viewport().get_visible_rect().size * 0.5
+	# CanvasLayer 以左上角为原点缩放，用 offset 把锚点挪到屏幕中心
+	$UI.scale = Vector2(s, s)
+	$UI.offset = center * (1.0 - s)
+
+
+func _on_fullscreen_toggle() -> void:
+	var fs: bool = DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
+	var mode := DisplayServer.WINDOW_MODE_WINDOWED if fs else DisplayServer.WINDOW_MODE_FULLSCREEN
+	DisplayServer.window_set_mode(mode)
+	_refresh_settings_ui()
 
 
 # ---------- HUD ----------
@@ -3607,7 +3883,11 @@ func _build_boot() -> void:
 	b_join.custom_minimum_size = Vector2(230, 40)
 	b_join.pressed.connect(_boot_join)
 	row.add_child(b_join)
-	var tip := _mk_label("H 帮助 · Tab 地图 · T 聊天 · 联机需中继服务器（网页版用 ?ws= 指定）", 12)
+	var b_opt := _mk_btn("设置（音乐 / 音量 / 缩放 / 全屏）")
+	b_opt.custom_minimum_size = Vector2(0, 36)
+	b_opt.pressed.connect(func() -> void: _toggle_settings(true))
+	vb.add_child(b_opt)
+	var tip := _mk_label("H 帮助 · Tab 地图 · T 聊天 · Esc 设置 · 联机需中继服务器（网页版用 ?ws= 指定）", 12)
 	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	tip.custom_minimum_size = Vector2(540, 0)

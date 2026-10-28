@@ -5,7 +5,8 @@ const DAY_DB := -9.0
 const NIGHT_DB := -9.0
 const RAIN_DB := -13.0
 
-var muted := true  # BGM 与雨声默认关闭，按 M 开启
+var muted := true  # BGM 与雨声默认关闭，按 M 或设置面板开启
+var volume := 1.0  # 音乐音量 0~1，设置面板调节
 
 var _day: AudioStreamPlayer
 var _night: AudioStreamPlayer
@@ -30,7 +31,37 @@ func update_phase(time_min: float, raining: bool) -> void:
 			_crossfade(_day if ph == "day" else _night, _night if ph == "day" else _day)
 	if raining != _rain_on:
 		_rain_on = raining
-		_fade(_rain, RAIN_DB if raining and not muted else -60.0, 1.2)
+		_fade(_rain, _rain_db(), 1.2)
+
+
+## 设置面板用：直接指定静音状态（内部复用 M 键那套淡入淡出）
+func set_muted(v: bool) -> void:
+	if v != muted:
+		toggle_mute()
+
+
+## 设置面板用：调完音量后把当前曲目推到新目标音量
+func apply_volume() -> void:
+	if muted:
+		return
+	var cur := _phase_day()
+	if cur.playing:
+		_fade(cur, _bgm_db(cur), 0.15)
+	if _rain.playing:
+		_fade(_rain, _rain_db(), 0.15)
+
+
+## 音量系数换算成 dB 偏移（0 视为完全静音）
+func _vol_db() -> float:
+	return linear_to_db(clampf(volume, 0.001, 1.0))
+
+
+func _bgm_db(p: AudioStreamPlayer) -> float:
+	return (DAY_DB if p == _day else NIGHT_DB) + _vol_db()
+
+
+func _rain_db() -> float:
+	return (RAIN_DB + _vol_db()) if (_rain_on and not muted) else -60.0
 
 
 func toggle_mute() -> bool:
@@ -41,8 +72,8 @@ func toggle_mute() -> bool:
 		_fade(_rain, -60.0, 0.4)
 	else:
 		var cur := _phase_day()
-		_fade(cur, DAY_DB if cur == _day else NIGHT_DB, 0.6, true)
-		_fade(_rain, RAIN_DB if _rain_on else -60.0, 0.6)
+		_fade(cur, _bgm_db(cur), 0.6, true)
+		_fade(_rain, _rain_db(), 0.6)
 	return muted
 
 
@@ -68,7 +99,7 @@ func _crossfade(fin: AudioStreamPlayer, fout: AudioStreamPlayer) -> void:
 		fin.play()
 	_fade(fout, -60.0, 1.6)
 	if not muted:
-		_fade(fin, DAY_DB if fin == _day else NIGHT_DB, 1.6)
+		_fade(fin, _bgm_db(fin), 1.6)
 
 
 func _fade(p: AudioStreamPlayer, target_db: float, dur: float, and_play := false) -> void:

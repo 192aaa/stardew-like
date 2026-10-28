@@ -4,6 +4,7 @@ extends Node
 var _streams := {}
 var _players: Array[AudioStreamPlayer] = []
 var _idx := 0
+var volume := 1.0  # 音效音量 0~1（0 即静音，设置面板调节）
 
 
 func _ready() -> void:
@@ -16,11 +17,11 @@ func _ready() -> void:
 
 
 func play(key: String, vol_db := 0.0, jitter := 0.05) -> void:
-	if not _streams.has(key):
+	if not _streams.has(key) or volume <= 0.001:
 		return
 	var p := _players[_idx]
 	_idx = (_idx + 1) % _players.size()
 	p.stream = _streams[key]
-	p.volume_db = vol_db
+	p.volume_db = vol_db + linear_to_db(clampf(volume, 0.001, 1.0))
 	p.pitch_scale = 1.0 + randf_range(-jitter, jitter)
 	p.play()
