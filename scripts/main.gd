@@ -21,6 +21,15 @@ const TEX_EGG := preload("res://assets/egg.png")
 const TEX_MILK := preload("res://assets/milk.png")
 const TEX_WOOL := preload("res://assets/wool.png")
 const RainScript := preload("res://scripts/rain.gd")
+const MinimapScript := preload("res://scripts/minimap.gd")
+const FriendArrowScript := preload("res://scripts/friend_arrow.gd")
+const TEX_GRASS_SNOW := preload("res://assets/grass_snow.png")
+const TEX_PATCH_SNOW := [
+	preload("res://assets/patch_snow1.png"),
+	preload("res://assets/patch_snow2.png"),
+	preload("res://assets/patch_snow3.png"),
+	preload("res://assets/patch_snow4.png"),
+]
 const VillagerScript := preload("res://scripts/villager.gd")
 const ChickenScript := preload("res://scripts/chicken.gd")
 const LivestockScript := preload("res://scripts/livestock.gd")
@@ -112,7 +121,7 @@ const DIALOGS := {
 var current_tool: int = Tool.HOE
 var time_min := float(DAY_START_MIN)
 var sleeping := false
-var weather := "sun"  # "sun" / "rain"
+var weather := "sun"  # "sun" / "rain" / "snow"
 var shop_open := false
 var craft_open := false
 var place_mode := ""
@@ -213,6 +222,7 @@ var _gifted_today := {}   # {村民id: 今日已送礼次数}，不存档
 
 # 联机（Net autoload）
 var _shadow: Node2D = null   # 对方玩家影子精灵
+var _shadow_tp := Vector2.ZERO # 影子目标位置（收到快照后平滑插值）
 var _snap_t := 0.0           # 10Hz 快照/位置播报计时
 var _pf_t := 0.0             # host 周期全量推送计时
 var _full_t := 0.0           # 全量推送防抖
@@ -221,6 +231,16 @@ var _guest_sleeping := false # guest 本地睡觉演出，等 host 全量数据�
 var _boot_panel: PanelContainer
 var _boot_status: Label
 var _boot_input: LineEdit
+var _boot_btn_new: Button
+var _new_confirm := false    # 新游戏二次确认
+var _last_season := -1       # 季节变化时重刷地表色调
+var _tex_ground_orig: Texture2D = null
+var _tex_patch_orig: Array = []
+var _minimap: Control
+var _arrow: Control
+var _chat_log: VBoxContainer
+var _chat_input: LineEdit
+var _chat_open := false
 
 
 func _ready() -> void:
@@ -248,6 +268,7 @@ func _ready() -> void:
 	_bobber.visible = false
 	add_child(_bobber)
 	_build_dialog()
+	_build_hud_extras()
 	_rain_node = RainScript.new()
 	_rain_node.z_index = 40
 	_rain_node.visible = false
@@ -257,8 +278,8 @@ func _ready() -> void:
 		npc.setup(load(cfg.tex), cfg.roam, cfg.name, cfg.spawn)
 		add_child(npc)
 		_villagers.append(npc)
-	weather = "rain" if randf() < 0.3 else "sun"
-	_rain_node.visible = weather == "rain"
+	_roll_weather()
+	_apply_season_tint()
 	_refresh_hud()
 	player.position = decor.DOOR_POS + Vector2(0, 44)
 	if _do_load(false):
@@ -275,8 +296,7 @@ func _ready() -> void:
 	Net.net_error.connect(_on_net_error)
 	Net.peer_joined.connect(_on_peer_joined)
 	Net.peer_left.connect(_on_peer_left)
-	if OS.get_environment("SL_UITEST") == "":
-		_build_boot()
+	_build_boot()
 
 
 func _process(delta: float) -> void:
@@ -285,10 +305,19 @@ func _process(delta: float) -> void:
 		time_min += delta * MINUTES_PER_SECOND
 		if time_min >= DAY_END_MIN:
 			_do_sleep(true)
+	if Game.season_index() != _last_season:  # 跨季换地表色调
+		_last_season = Game.season_index()
+		_apply_season_tint()
 	canvas_mod.color = _sky_color(time_min)
 	if weather == "rain":
 		canvas_mod.color = canvas_mod.color.lerp(Color(0.62, 0.68, 0.8), 0.4)
-	day_label.text = "第 %d 天  %s · %s" % [Game.day, _clock_text(), "雨" if weather == "rain" else "晴"]
+	elif weather == "snow":
+		canvas_mod.color = canvas_mod.color.lerp(Color(0.76, 0.82, 0.94), 0.35)
+	day_label.text = "第 %d 天 · %s %d/%d  %s · %s" % [
+		Game.day, Game.season_name(), Game.season_day(), Game.SEASON_DAYS,
+		_clock_text(), _weather_name()]
+	if _shadow != null:
+		_shadow.position = _shadow.position.lerp(_shadow_tp, clampf(delta * 12.0, 0.0, 1.0))
 	_update_target()
 	_update_hint()
 	if shop_open and player.position.distance_to(decor.SHOP_POS) > 130.0:
@@ -328,6 +357,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		_toast("背景音乐已%s（M 切换）" % ("开启" if not m else "关闭"))
 	elif event.is_action_pressed("codex"):
 		_toggle_dex(not dex_open)
+	elif event.is_action_pressed("minimap"):
+		_minimap.toggle()
+	elif event.is_action_pressed("chat"):
+		_chat_begin()
 	elif event.is_action_pressed("craft"):
 		if help_open:
 			_toggle_help(false)
@@ -370,7 +403,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("interact"):
 		_interact_chain()
 	elif event.is_action_pressed("ui_cancel"):
-		if help_open:
+		if _chat_open:
+			_chat_close()
+		elif help_open:
 			_toggle_help(false)
 		elif dex_open:
 			_toggle_dex(false)
@@ -1007,7 +1042,7 @@ func _apply_payload(d: Dictionary) -> void:
 	if _orders.is_empty():
 		_gen_orders()
 	weather = String(d.get("weather", "sun"))
-	_rain_node.visible = weather == "rain"
+	_apply_weather_visual()
 	time_min = clampf(float(d.get("time_min", DAY_START_MIN)), DAY_START_MIN, DAY_END_MIN - 1.0)
 	current_tool = clampi(int(d.get("tool", 0)), 0, 9)
 	player.position = Vector2(
@@ -1117,11 +1152,15 @@ func _do_sleep(passed_out: bool) -> void:
 		else:
 			fest_msg = " · %s未达标（%d/%d）" % [cfg.name, _fest_count, cfg.goal]
 	_fest_count = 0
+	var before_season := Game.season_index()
 	Game.day += 1
 	time_min = float(DAY_START_MIN)
-	weather = "rain" if randf() < 0.3 else "sun"
-	_rain_node.visible = weather == "rain"
+	_roll_weather()
 	_refresh_festival()
+	var season_msg := ""
+	if Game.season_index() != before_season:
+		_apply_season_tint()
+		season_msg = " · %s季到了" % Game.season_name()
 	var lost: int = farm.on_new_day(weather == "rain")
 	gather.spawn_daily()
 	mine.spawn_daily()
@@ -1143,7 +1182,11 @@ func _do_sleep(passed_out: bool) -> void:
 	player.position = decor.DOOR_POS + Vector2(0, 46)
 	var save_ok := _autosave()
 	var tail := " · 已自动存档" if save_ok else ""
-	var rtail := " · 今天下雨，农田已浇好" if weather == "rain" else ""
+	var rtail := season_msg
+	if weather == "rain":
+		rtail += " · 今天下雨，农田已浇好"
+	elif weather == "snow":
+		rtail += " · 今天下雪了"
 	if Game.eggs_ready > 0:
 		rtail += " · 鸡下了 %d 颗蛋" % Game.eggs_ready
 	if Game.milk_ready > 0:
@@ -2624,11 +2667,17 @@ func _build_help() -> void:
 	_help_section(col_l, "基础操作", [
 		"WASD / 方向键 移动　　空格 / 鼠标左键 使用工具　　E 互动",
 		"1-0 切换工具　　C 制作　　H 帮助　　Esc 关闭　　F5 存档 / F9 读档　　M 音乐",
+		"Tab 小地图放大缩小　　T 和联机好友打字聊天",
 	])
 	_help_section(col_l, "种田流程", [
 		"1 锄头开垦 → 3~6/9/0 播种 → 2 浇水 → 每天浇水才生长 → 成熟后空格收获",
 		"玉米/蓝莓收获后不拔根，过几天会再次结果；蓝莓一次结两颗",
 		"对着货摊按 E 开商店：买种子、卖作物和鱼、升级工具",
+	])
+	_help_section(col_l, "四季轮作（新增）", [
+		"每季 14 天轮换春夏秋冬：春萝卜土豆草莓 / 夏草莓玉米蓝莓 / 秋南瓜玉米蓝莓",
+		"冬季休耕不能播种（已种的继续长），改为钓鱼、挖矿、加工与节日为主",
+		"换季地面与树木随之变色，冬天下雪；雨天自动浇灌农田、鱼更容易上钩",
 	])
 	_help_section(col_l, "钓鱼（7 鱼竿）", [
 		"池塘边空格甩竿 → 浮漂变红瞬间再按空格提竿",
@@ -2645,18 +2694,14 @@ func _build_help() -> void:
 		"东侧矿洞区每天刷新矿岩：8 斧镐敲击，可得铜矿/铁矿/宝石",
 		"C 造熔炉（石8木2）：放矿隔夜铸锭；金币+矿可升铜→铁→金锄壶（3x3/5x5/7x7）",
 	])
-	_help_section(col_l, "天气与村民", [
-		"雨天雨水自动浇灌农田、鱼更容易上钩；晴天记得自己浇水",
-		"罗莎在花田、老本在集市散步，靠近按 E 可送礼或聊天",
-	])
 	_help_section(col_r, "烹饪料理（新增）", [
 		"C 制作灶台（石6木4）放到农田，对灶台按 E 打开烹饪面板",
 		"沙拉/浓汤/甜点吃下大量回体力，也能卖钱，熬夜赶工必备",
 	])
 	_help_section(col_r, "送礼与好感（新增）", [
-		"靠近村民按 E 打开送礼面板：作物/鱼/矿石/产品/料理都行",
-		"好感 = 售价的 1/10（最高 +8），每人每天收 2 份；聊天每天一次 +10",
-		"好感达 20/40/60/80 首次回赠：金币/种子/宝石/挚友大礼",
+		"罗莎在花田、老本在集市散步，靠近按 E 打开送礼面板",
+		"作物/鱼/矿石/产品/料理都能送，好感 = 售价的 1/10（最高 +8），每天 2 份",
+		"好感达 20/40/60/80 首次回赠：金币/种子/宝石/挚友大礼；聊天每天一次 +10",
 	])
 	_help_section(col_r, "加工产业链（新增）", [
 		"C 制作蛋黄酱机/食品加工机/灶台/熔炉/奶酪机，放到农田格子上",
@@ -3031,6 +3076,139 @@ func _mk_btn(txt: String) -> Button:
 	return b
 
 
+# ---------- 小地图 / 好友方位 / 聊天 / 季节 ----------
+
+## 右上角小地图 + 好友方位箭头 + 联机聊天记录与输入框
+func _build_hud_extras() -> void:
+	_minimap = MinimapScript.new()
+	_minimap.main = self
+	$UI.add_child(_minimap)
+	_arrow = FriendArrowScript.new()
+	_arrow.main = self
+	$UI.add_child(_arrow)
+	_chat_log = VBoxContainer.new()
+	_chat_log.anchor_top = 1.0
+	_chat_log.anchor_bottom = 1.0
+	_chat_log.offset_left = 20.0
+	_chat_log.offset_top = -252.0
+	_chat_log.offset_right = 540.0
+	_chat_log.offset_bottom = -140.0
+	_chat_log.alignment = BoxContainer.ALIGNMENT_END
+	_chat_log.add_theme_constant_override("separation", 2)
+	_chat_log.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	$UI.add_child(_chat_log)
+	_chat_input = LineEdit.new()
+	_chat_input.anchor_top = 1.0
+	_chat_input.anchor_bottom = 1.0
+	_chat_input.offset_left = 20.0
+	_chat_input.offset_top = -132.0
+	_chat_input.offset_right = 400.0
+	_chat_input.offset_bottom = -94.0
+	_chat_input.placeholder_text = "对好友说点什么，回车发送 / Esc 取消"
+	_chat_input.max_length = 60
+	_chat_input.add_theme_font_override("font", _ui_font)
+	_chat_input.add_theme_font_size_override("font_size", 15)
+	_chat_input.visible = false
+	_chat_input.text_submitted.connect(_chat_send)
+	$UI.add_child(_chat_input)
+
+
+## 打开聊天输入（T 键）；输入期间停掉主角移动，避免边走边打字
+func _chat_begin() -> void:
+	if _chat_open or sleeping:
+		return
+	if not Net.is_online():
+		_toast("单人模式下没法聊天，先建房或加入好友的房间")
+		return
+	_chat_open = true
+	_chat_input.text = ""
+	_chat_input.visible = true
+	_chat_input.grab_focus()
+	player.set_physics_process(false)
+
+
+func _chat_close() -> void:
+	if not _chat_open:
+		return
+	_chat_open = false
+	_chat_input.visible = false
+	_chat_input.release_focus()
+	if not sleeping:
+		player.set_physics_process(true)
+
+
+## 回车发送：本地先上屏，再转发给对方
+func _chat_send(text: String) -> void:
+	var msg := text.strip_edges()
+	_chat_close()
+	if msg == "":
+		return
+	_add_chat_line("我：" + msg)
+	Net.send({t = "chat", msg = msg})
+
+
+## 聊天记录：最多留 5 条，9 秒后淡出自动清除
+func _add_chat_line(txt: String) -> void:
+	if _chat_log == null:
+		return
+	var lb := _mk_label(txt, 14)
+	lb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lb.custom_minimum_size = Vector2(500, 0)
+	_chat_log.add_child(lb)
+	while _chat_log.get_child_count() > 5:
+		var old := _chat_log.get_child(0)
+		_chat_log.remove_child(old)
+		old.queue_free()
+	var tw := lb.create_tween()
+	tw.tween_interval(9.0)
+	tw.tween_property(lb, "modulate:a", 0.0, 1.2)
+	tw.tween_callback(lb.queue_free)
+
+
+## 按季节给地面/地皮斑块染色：春常色、夏偏暖、秋偏橙、冬换成雪地图案
+func _apply_season_tint() -> void:
+	var g: Sprite2D = $Ground
+	if _tex_ground_orig == null:  # 首次记录原贴图，切季时能换回
+		_tex_ground_orig = g.texture
+		for i in 4:
+			_tex_patch_orig.append((get_node("Patch%d" % (i + 1)) as Sprite2D).texture)
+	var sid := String(Game.season().id)
+	var win := sid == "winter"
+	var tint: Color = Color(1, 1, 1) if win else Game.season().tint
+	g.texture = TEX_GRASS_SNOW if win else _tex_ground_orig
+	g.modulate = tint
+	for i in 4:
+		var sp := get_node("Patch%d" % (i + 1)) as Sprite2D
+		sp.texture = TEX_PATCH_SNOW[i] if win else _tex_patch_orig[i]
+		sp.modulate = tint
+	# 冬天地表细节（树/屋顶）微微泛冷白
+	decor.modulate = Color(0.92, 0.96, 1.04) if win else Color(1, 1, 1)
+
+
+## 隔天天气：冬季可能下雪，其余季节 30% 下雨
+func _roll_weather() -> void:
+	if String(Game.season().id) == "winter":
+		weather = "snow" if randf() < 0.4 else "sun"
+	else:
+		weather = "rain" if randf() < 0.3 else "sun"
+	_apply_weather_visual()
+
+
+## 天气粒子与显隐统一设置（雪天切 rain.gd 的雪花模式）
+func _apply_weather_visual() -> void:
+	_rain_node.visible = weather != "sun"
+	_rain_node.mode = "snow" if weather == "snow" else "rain"
+
+
+func _weather_name() -> String:
+	match weather:
+		"rain":
+			return "雨"
+		"snow":
+			return "雪"
+	return "晴"
+
+
 # ---------- 联机：同步与意图 ----------
 
 ## 每帧联机计时：全量防抖 / host 周期全量 / 10Hz 快照与位置播报
@@ -3119,6 +3297,8 @@ func _on_net_msg(m: Dictionary) -> void:
 				_net_full_now()
 		"evt":
 			_apply_evt(m)
+		"chat":
+			_add_chat_line("好友：" + String(m.get("msg", "")))
 
 
 ## guest：应用 host 的 10Hz 轻量快照
@@ -3128,7 +3308,7 @@ func _apply_snap(m: Dictionary) -> void:
 	var w := String(m.get("w", weather))
 	if w != weather:
 		weather = w
-		_rain_node.visible = weather == "rain"
+		_apply_weather_visual()
 	var e: Dictionary = m.get("e", {})
 	_apply_ents(e.get("c"), _chickens)
 	_apply_ents(e.get("v"), _villagers)
@@ -3147,7 +3327,9 @@ func _apply_ents(arr, nodes: Array) -> void:
 func _update_shadow(p: Array) -> void:
 	if _shadow == null or p.is_empty():
 		return
-	_shadow.position = Vector2(float(p[0]), float(p[1]))
+	_shadow_tp = Vector2(float(p[0]), float(p[1]))
+	if _shadow.position.distance_to(_shadow_tp) > 260.0:  # 瞬移（换场景/睡觉）时直接对齐
+		_shadow.position = _shadow_tp
 	var spr: Sprite2D = _shadow.get_node("Spr")
 	spr.frame_coords = Vector2i(0, int(p[2]))
 	spr.flip_h = bool(p[3])
@@ -3269,8 +3451,52 @@ func _apply_intent(k: String, d: Dictionary) -> void:
 				_apply_chest_item(String(d.id), int(d.n))
 			else:
 				_apply_fish(String(d.id))
+	# 在好友头顶飘一句动作说明，让房主直接看到好友在忙什么
+	if _shadow != null:
+		var verb := _intent_verb(k)
+		if verb != "":
+			_float_text(verb, _shadow.global_position + Vector2(0, -46),
+					Color(0.55, 0.9, 1.0))
 	_remote_exec = false
 	_net_full_soon()
+
+
+## guest 动作的中文短标签（host 侧飘字用）
+func _intent_verb(k: String) -> String:
+	match k:
+		"tool":
+			return "好友在干活"
+		"place":
+			return "好友放置了东西"
+		"berry":
+			return "好友摘了野莓"
+		"eggs":
+			return "好友收了鸡蛋"
+		"barn":
+			return "好友收了奶/毛"
+		"pet":
+			return "好友摸了摸宠物"
+		"machine":
+			return "好友用了加工机"
+		"sleep":
+			return "好友去睡觉了"
+		"buy":
+			return "好友买了东西"
+		"sell", "sell_item":
+			return "好友卖出了东西"
+		"cook":
+			return "好友做了料理"
+		"eat":
+			return "好友吃了料理"
+		"gift":
+			return "好友送出了礼物"
+		"chat":
+			return "好友在聊天"
+		"order":
+			return "好友交付了订单"
+		"fish":
+			return "好友钓到了鱼"
+	return ""
 
 
 ## 物品所属出售分类（联机 sell_item 意图重建 cat 字典用）
@@ -3312,7 +3538,7 @@ func _villager_name(id: String) -> String:
 	return id
 
 
-# ---------- 开局面板：单人 / 建房 / 加入 ----------
+# ---------- 标题画面：继续 / 新游戏 / 建房 / 加入 ----------
 
 func _build_boot() -> void:
 	get_tree().paused = true
@@ -3322,29 +3548,46 @@ func _build_boot() -> void:
 	_boot_panel.anchor_top = 0.5
 	_boot_panel.anchor_right = 0.5
 	_boot_panel.anchor_bottom = 0.5
-	_boot_panel.offset_left = -250.0
-	_boot_panel.offset_top = -160.0
-	_boot_panel.offset_right = 250.0
-	_boot_panel.offset_bottom = 160.0
+	_boot_panel.offset_left = -290.0
+	_boot_panel.offset_top = -238.0
+	_boot_panel.offset_right = 290.0
+	_boot_panel.offset_bottom = 238.0
 	$UI.add_child(_boot_panel)
 	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 10)
+	vb.add_theme_constant_override("separation", 9)
 	_boot_panel.add_child(vb)
 	var pad := Control.new()
-	pad.custom_minimum_size = Vector2(460, 0)
+	pad.custom_minimum_size = Vector2(540, 0)
 	vb.add_child(pad)
-	var title := _mk_label("像素农场 · 双人联机", 22)
+	# 标题
+	var title := _mk_label("像 素 农 场", 34)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vb.add_child(title)
-	_boot_status = _mk_label("选择游玩方式", 14)
+	var sub := _mk_label("四季流转 · 双人联机", 14)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.modulate = Color(1, 1, 1, 0.8)
+	vb.add_child(sub)
+	var hr := HSeparator.new()
+	vb.add_child(hr)
+	# 存档信息
+	var info := "还没有存档，从第 1 天开始"
+	if Save.has_save():
+		info = "存档：第 %d 天 · %s季第 %d 天 · %d 金币" % [
+			Game.day, Game.season_name(), Game.season_day(), Game.gold]
+	_boot_status = _mk_label(info, 13)
 	_boot_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_boot_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_boot_status.custom_minimum_size = Vector2(460, 0)
+	_boot_status.custom_minimum_size = Vector2(540, 0)
 	vb.add_child(_boot_status)
-	var b_solo := _mk_btn("单人游戏")
+	var b_solo := _mk_btn("继续游戏" if Save.has_save() else "开始游戏")
 	b_solo.custom_minimum_size = Vector2(0, 40)
 	b_solo.pressed.connect(_boot_solo)
 	vb.add_child(b_solo)
+	if Save.has_save():
+		_boot_btn_new = _mk_btn("新游戏（清空存档）")
+		_boot_btn_new.custom_minimum_size = Vector2(0, 36)
+		_boot_btn_new.pressed.connect(_boot_new)
+		vb.add_child(_boot_btn_new)
 	var b_host := _mk_btn("建房联机（生成房间码给好友）")
 	b_host.custom_minimum_size = Vector2(0, 40)
 	b_host.pressed.connect(_boot_host)
@@ -3354,21 +3597,66 @@ func _build_boot() -> void:
 	vb.add_child(row)
 	_boot_input = LineEdit.new()
 	_boot_input.placeholder_text = "好友的房间码"
-	_boot_input.custom_minimum_size = Vector2(230, 40)
+	_boot_input.custom_minimum_size = Vector2(300, 40)
 	_boot_input.max_length = 4
 	_boot_input.add_theme_font_override("font", _ui_font)
 	_boot_input.add_theme_font_size_override("font_size", 16)
+	_boot_input.text_submitted.connect(func(_t: String) -> void: _boot_join())
 	row.add_child(_boot_input)
 	var b_join := _mk_btn("加入好友")
-	b_join.custom_minimum_size = Vector2(150, 40)
+	b_join.custom_minimum_size = Vector2(230, 40)
 	b_join.pressed.connect(_boot_join)
 	row.add_child(b_join)
-	var tip := _mk_label("联机需先启动 tools/relay 中继服务器；网页版可用 ?ws= 指定地址", 12)
+	var tip := _mk_label("H 帮助 · Tab 地图 · T 聊天 · 联机需中继服务器（网页版用 ?ws= 指定）", 12)
 	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	tip.modulate = Color(1, 1, 1, 0.7)
+	tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip.custom_minimum_size = Vector2(540, 0)
+	tip.modulate = Color(1, 1, 1, 0.65)
 	vb.add_child(tip)
 	Net.room_created.connect(_on_room_created)
 	Net.joined_room.connect(_on_joined_room)
+	# 标题画面期间先收起小地图与好友箭头，进游戏后再显示
+	_minimap.visible = false
+	_arrow.visible = false
+
+
+## 新游戏：二次确认后清档重来（农场/矿洞/订单/家畜全部重置）
+func _boot_new() -> void:
+	if not _new_confirm:
+		_new_confirm = true
+		_boot_btn_new.text = "再点一次：确认清空存档"
+		_boot_status.text = "新游戏会清空当前存档与农场，确定要重来吗？"
+		return
+	_start_new_game()
+	_boot_status.text = "新的春天开始了！"
+	_boot_finish(false)
+
+
+## 从零开始：清存档 + 全局状态复位 + 世界重建
+func _start_new_game() -> void:
+	Save.write("")
+	Game.reset_state()
+	farm.restore_from({})
+	mine.restore([])
+	mine.spawn_daily()
+	gather.spawn_daily()
+	time_min = float(DAY_START_MIN)
+	_roll_weather()
+	_refresh_eggs()
+	_sync_chickens()
+	_sync_livestock()
+	_sync_pets()
+	_refresh_barn_products()
+	_gen_orders()
+	_fest_count = 0
+	_talked_today.clear()
+	_petted_today.clear()
+	_gifted_today.clear()
+	_last_season = Game.season_index()
+	_apply_season_tint()
+	_refresh_festival()
+	_refresh_hud()
+	player.position = decor.DOOR_POS + Vector2(0, 44)
 
 
 func _boot_solo() -> void:
@@ -3431,6 +3719,8 @@ func _boot_finish(as_net: bool) -> void:
 		Net.room_created.disconnect(_on_room_created)
 	if Net.joined_room.is_connected(_on_joined_room):
 		Net.joined_room.disconnect(_on_joined_room)
+	_minimap.visible = true
+	_arrow.visible = true
 	if as_net:
 		_make_shadow()
 		if help_open:

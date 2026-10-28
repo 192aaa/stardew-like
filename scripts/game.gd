@@ -79,6 +79,16 @@ const RECIPES := {
 	"sprinkler2": {"name": "高级洒水器", "cost": {"iron_bar": 1, "stone": 4}},
 }
 
+## 季节系统：每季 14 天，一年 4 季共 56 天；季节由天数推导，不单独存档
+## crops = 本季可播种的作物；tint = 地表色调（春常色/夏偏暖/秋偏橙/冬偏冷）
+const SEASON_DAYS := 14
+const SEASONS := [
+	{"id": "spring", "name": "春", "tint": Color(1.0, 1.0, 1.0), "crops": ["parsnip", "potato", "straw"]},
+	{"id": "summer", "name": "夏", "tint": Color(1.05, 1.0, 0.84), "crops": ["straw", "corn", "blue"]},
+	{"id": "autumn", "name": "秋", "tint": Color(1.06, 0.86, 0.62), "crops": ["pumpkin", "corn", "blue"]},
+	{"id": "winter", "name": "冬", "tint": Color(0.84, 0.9, 1.02), "crops": []},
+]
+
 const HOE_UP_COST := 500
 const CAN_UP_COST := 500
 ## 铁质升级：金币 + 铜矿，范围 5x5
@@ -194,6 +204,38 @@ var total_cooked := 0   # 累计烹饪次数
 var gift_count := 0     # 累计送礼次数
 ## 送礼里程碑回赠记录：{村民id: [4 个 bool]}，入存档防重复领取
 var gift_milestones := {"rosa": [false, false, false, false], "ben": [false, false, false, false]}
+
+
+## 当前季节下标（0 春 / 1 夏 / 2 秋 / 3 冬）
+func season_index() -> int:
+	return int(floor((day - 1) / float(SEASON_DAYS))) % SEASONS.size()
+
+
+func season() -> Dictionary:
+	return SEASONS[season_index()]
+
+
+func season_name() -> String:
+	return String(season().name)
+
+
+## 本季第几天（1 起）
+func season_day() -> int:
+	return (day - 1) % SEASON_DAYS + 1
+
+
+## 该作物本季能否播种
+func can_plant(id: String) -> bool:
+	return (season().crops as Array).has(id)
+
+
+## 该作物允许播种的季节名（错误提示用）
+func crop_seasons(id: String) -> String:
+	var out: Array = []
+	for s in SEASONS:
+		if (s.crops as Array).has(id):
+			out.append(String(s.name))
+	return "" if out.is_empty() else "、".join(out)
 
 
 func add_gold(n: int) -> void:
@@ -315,3 +357,48 @@ func _ach_ok(id: String) -> bool:
 		"cheese_1":
 			return total_cheese >= 1
 	return false
+
+
+## 新游戏：把全局状态恢复到初始值（标题界面「新游戏」清档后调用）
+func reset_state() -> void:
+	gold = 500
+	day = 1
+	seeds = {"parsnip": 5, "potato": 0, "straw": 0, "pumpkin": 0, "corn": 0, "blue": 0}
+	harvest = {"parsnip": 0, "potato": 0, "straw": 0, "pumpkin": 0, "corn": 0, "blue": 0}
+	items = {
+		"wood": 0, "stone": 0, "berry": 0, "smelt": 0, "perch": 0, "trout": 0,
+		"copper": 0, "iron": 0, "gem": 0,
+		"copper_bar": 0, "iron_bar": 0, "milk": 0, "wool": 0,
+		"mayo": 0, "jam": 0, "pickle": 0, "pie": 0, "cheese": 0,
+		"salad": 0, "soup": 0, "dessert": 0,
+	}
+	friends = {"rosa": 0, "ben": 0}
+	stamina = 100.0
+	max_stamina = 100.0
+	hoe_level = 1
+	can_level = 1
+	xp = {"farm": 0, "fish": 0, "gather": 0}
+	skill_lv = {"farm": 1, "fish": 1, "gather": 1}
+	caught_fish = {}
+	chest_opened = 0
+	chicken_count = 0
+	eggs_ready = 0
+	total_eggs = 0
+	cow_count = 0
+	sheep_count = 0
+	milk_ready = 0
+	wool_ready = 0
+	total_milk = 0
+	total_wool = 0
+	total_bars = 0
+	total_cheese = 0
+	rod_lv = 1
+	pets = []
+	pet_mood = {"cat": 0, "dog": 0}
+	total_harvest = 0
+	orders_done = 0
+	achievements = {}
+	total_cooked = 0
+	gift_count = 0
+	gift_milestones = {"rosa": [false, false, false, false], "ben": [false, false, false, false]}
+	state_changed.emit()

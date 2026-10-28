@@ -1165,10 +1165,14 @@ def pond_edge(w=120, h=80):
     return upscale(img)
 
 
-def render_patch(w, h, seed):
-    """预渲染农田地块：暗草底 + 深色描边 + 内侧高光 + 割草纹理"""
+def render_patch(w, h, seed, pal=None):
+    """预渲染农田地块：暗草底 + 深色描边 + 内侧高光 + 割草纹理（pal 可换成雪地调色板）"""
     rng = random.Random(seed)
-    base, dark, light = (84, 146, 64), (58, 104, 44), (100, 162, 78)
+    if pal is None:
+        base, dark, light, edge, hi, stripe = (
+            84, 146, 64), (58, 104, 44), (100, 162, 78), (52, 94, 40), (110, 172, 88), (74, 128, 56)
+    else:
+        base, dark, light, edge, hi, stripe = pal
     img = Image.new("RGBA", (w, h))
     px = img.load()
     for y in range(h):
@@ -1179,14 +1183,41 @@ def render_patch(w, h, seed):
     for y in range(0, h, 12):  # 割草纹
         for x in range(w):
             if rng.random() < 0.5:
-                px[x, (y + x // 3) % h] = (74, 128, 56, 255)
+                px[x, (y + x // 3) % h] = stripe + (255,)
     for y in range(h):  # 描边 + 内高光
         for x in range(w):
             if x == 0 or y == 0 or x == w - 1 or y == h - 1:
-                px[x, y] = (52, 94, 40, 255)
+                px[x, y] = edge + (255,)
             elif x == 1 or y == 1 or x == w - 2 or y == h - 2:
-                px[x, y] = (110, 172, 88, 255)
+                px[x, y] = hi + (255,)
     return upscale(img)
+
+
+## 冬季雪地调色板（grass_snow / patch_snow 用）
+SNOW_GRASS = dict(base=(210, 221, 233), dark=(190, 203, 217),
+                  light=(226, 235, 245), blade=(172, 191, 210))
+SNOW_PATCH = ((206, 218, 231), (182, 197, 213), (222, 231, 242),
+              (158, 178, 199), (238, 245, 252), (188, 203, 220))
+
+
+def grass_snow(seed=1):
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (16, 16))
+    px = img.load()
+    for y in range(16):
+        for x in range(16):
+            r = rng.random()
+            c = SNOW_GRASS["dark"] if r < 0.16 else (
+                SNOW_GRASS["light"] if r < 0.34 else SNOW_GRASS["base"])
+            px[x, y] = c + (255,)
+    for _ in range(5):  # 雪面浅坑
+        x, y = rng.randrange(16), rng.randrange(16)
+        px[x, y] = SNOW_GRASS["blade"] + (255,)
+        px[(x + 1) % 16, y] = SNOW_GRASS["blade"] + (255,)
+    for _ in range(3):  # 冰晶亮点
+        x, y = rng.randrange(16), rng.randrange(16)
+        px[x, y] = (252, 254, 255, 255)
+    return img
 
 
 def tuft():
@@ -2370,11 +2401,13 @@ def bgm_night():
 
 def main():
     save(upscale(tile_grass(1, dots=True)), "grass.png")
+    save(upscale(grass_snow()), "grass_snow.png")
     for f in range(4):
         save(upscale(tile_water(f)), "water%d.png" % f)
     save(pond_edge(), "pond_edge.png")
     for i, (w, h) in enumerate(((240, 170), (270, 140), (220, 120), (250, 120)), 1):
         save(render_patch(w // 2, h // 2, i), "patch%d.png" % i)
+        save(render_patch(w // 2, h // 2, i, SNOW_PATCH), "patch_snow%d.png" % i)
     save(upscale(tile_soil(False)), "soil.png")
     save(upscale(tile_soil(True)), "soil_wet.png")
     save(player_sheet(), "player.png")

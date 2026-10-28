@@ -107,6 +107,12 @@ func try_plant(c: Vector2i, id: String) -> String:
 		return "先用锄头开垦这块地"
 	if tiles[c].crop != "":
 		return "这里已经种了作物"
+	if not Game.can_plant(id):
+		var ss := Game.crop_seasons(id)
+		if ss == "":
+			return "%s季不能种地（冬天休耕，去钓鱼或挖矿吧）" % Game.season_name()
+		return "%s只在%s季能种，现在是%s季" % [
+			Game.CROPS[id].name, ss, Game.season_name()]
 	tiles[c].crop = id
 	tiles[c].stage = 0
 	queue_redraw()
