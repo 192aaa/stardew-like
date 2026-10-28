@@ -159,6 +159,9 @@ var _season := 0
 # 温室：建成后绘制玻璃房并挡墙（脚本创建，读档后由 main 调用 set_greenhouse 恢复）
 var _gh_built := false
 var _gh_bodies: Array = []
+# 低配模式：关掉粒子与动态氛围，移动端省电提帧
+var low_perf := false
+var _smoke: CPUParticles2D
 
 
 func _ready() -> void:
@@ -275,6 +278,8 @@ func _process(delta: float) -> void:
 	_glow_lamp.modulate.a = night * 0.9 * flick
 	_glow_coop.modulate.a = night * 0.8 * flick
 	_glow_barn.modulate.a = night * 0.8 * flick
+	if low_perf:
+		return  # 低配模式：只保留水面与灯光，跳过萤火/蝴蝶/波光/云影
 	for i in _fireflies.size():
 		var f := _fireflies[i]
 		var b: Vector2 = FIREFLY_BASE[i]
@@ -313,20 +318,47 @@ func set_festival(on: bool) -> void:
 func set_season(i: int) -> void:
 	_season = clampi(i, 0, 3)
 	if _petals:
-		_petals.emitting = _season == 0
-		_petals.visible = _season == 0
+		_petals.emitting = (not low_perf) and _season == 0
+		_petals.visible = (not low_perf) and _season == 0
 		if _season == 0:
 			_petals.restart()
 	for p in _leaf_emitters:
-		p.emitting = _season == 2
-		p.visible = _season == 2
+		p.emitting = (not low_perf) and _season == 2
+		p.visible = (not low_perf) and _season == 2
 		if _season == 2:
 			p.restart()
 	if _snow:
-		_snow.emitting = _season == 3
-		_snow.visible = _season == 3
+		_snow.emitting = (not low_perf) and _season == 3
+		_snow.visible = (not low_perf) and _season == 3
 		if _season == 3:
 			_snow.restart()
+
+
+## 低配模式开关：隐藏并停止所有氛围粒子与动态小物（main 设置里切换）
+func set_low_perf(on: bool) -> void:
+	low_perf = on
+	if _petals:
+		_petals.emitting = (not on) and _season == 0
+		_petals.visible = (not on) and _season == 0
+		if on:
+			_petals.restart()
+	for p in _leaf_emitters:
+		p.emitting = (not on) and _season == 2
+		p.visible = (not on) and _season == 2
+	if _snow:
+		_snow.emitting = (not on) and _season == 3
+		_snow.visible = (not on) and _season == 3
+	for f in _fireflies:
+		f.visible = not on
+	for b in _butterflies:
+		b.visible = not on
+	for c in _clouds:
+		c.visible = not on
+	for s in _sparkles:
+		s.visible = not on
+	if _smoke:
+		_smoke.emitting = not on
+		_smoke.visible = not on
 
 
 ## 温室建成开关：开启后绘制玻璃房并挡住四壁（下方留门口）
@@ -501,6 +533,7 @@ func _add_glow(pos: Vector2, scale_f: float) -> Sprite2D:
 
 func _setup_smoke() -> void:
 	var smoke := CPUParticles2D.new()
+	_smoke = smoke
 	smoke.position = Vector2(-590, -560)
 	smoke.amount = 5
 	smoke.lifetime = 2.4

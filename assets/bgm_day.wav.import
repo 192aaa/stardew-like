@@ -2,7 +2,7 @@
 
 importer="wav"
 type="AudioStreamWAV"
-uid="uid://cxlb4j5ot2mhm"
+uid="uid://bjqc1cr3agk5x"
 path="res://.godot/imported/bgm_day.wav-5e22428dd2d7030beae897fe3d460fd1.sample"
 
 [deps]
@@ -13,9 +13,9 @@ dest_files=["res://.godot/imported/bgm_day.wav-5e22428dd2d7030beae897fe3d460fd1.
 [params]
 
 force/8_bit=false
-force/mono=false
-force/max_rate=false
-force/max_rate_hz=44100
+force/mono=true
+force/max_rate=true
+force/max_rate_hz=22050
 edit/trim=false
 edit/normalize=false
 edit/loop_mode=0

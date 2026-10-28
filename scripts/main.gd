@@ -26,6 +26,7 @@ const TEX_WOOL := preload("res://assets/wool.png")
 const RainScript := preload("res://scripts/rain.gd")
 const MinimapScript := preload("res://scripts/minimap.gd")
 const FriendArrowScript := preload("res://scripts/friend_arrow.gd")
+const GoalArrowScript := preload("res://scripts/goal_arrow.gd")
 const TouchScript := preload("res://scripts/touch_controls.gd")
 const TEX_GRASS_SNOW := preload("res://assets/grass_snow.png")
 const TEX_PATCH_SNOW := [
@@ -155,6 +156,17 @@ var help_panel: PanelContainer
 var _stam_fill: ColorRect
 var _stam_label: Label
 
+# 低配模式 / 每日农场小报 / 目标指引箭头
+var _perf_low := false
+var _set_perf_btn: Button
+var _set_new_btn: Button
+var _settings_new_confirm := false
+var _daily_open := false
+var _daily_panel: PanelContainer
+var _daily_vb: VBoxContainer
+var _daily_text: Label
+var _goal_arrow: Control
+
 # 订单任务板
 var _orders: Array = []  # {kind, item, n, gold, who, done}
 var _orders_panel: PanelContainer
@@ -195,18 +207,25 @@ var _bobber: Sprite2D
 var _bobber_base := Vector2.ZERO
 var _bite_t := 0.0
 var _bite_window := 0.0
-var _bar_y := 0.5
-var _bar_v := 0.0
-var _fish_y := 0.5
-var _fish_target := 0.5
-var _fish_timer := 0.0
-var _progress := 30.0
+# 钓鱼时机玩法：光标上下扫动，在绿区内按一下算命中，命中 N 次收鱼
+var _cursor_y := 0.0
+var _cursor_dir := 1.0
+var _zone_y := 0.5
+var _zone_half := 0.12
+var _hits := 0
+var _misses := 0
+var _need_hits := 3
+var _max_miss := 3
+var _hit_flash := 0.0
+var _hit_ok := false
+var _hook_cd := 0.0
 var _wt := 0.0
 var _hooked_id := ""       # 本次咬钩的鱼（提竿瞬间按权重抽出）
 var _fight_legend := false # 鱼王专属战斗：金条、更凶猛
 var _fish_tip: Label       # 战斗提示文字（鱼王战换文案）
 var _fish_root: Control
 var _fish_bar: ColorRect
+var _zone_rect: ColorRect
 var _fish_icon: TextureRect
 var _prog_fill: ColorRect
 
@@ -303,6 +322,7 @@ func _ready() -> void:
 	_build_hud_extras()
 	_build_guide()
 	_build_bundles()
+	_build_daily()
 	_rain_node = RainScript.new()
 	_rain_node.z_index = 40
 	_rain_node.visible = false
@@ -336,6 +356,9 @@ func _ready() -> void:
 	_build_boot()
 	_build_settings()
 	_apply_settings()
+	# 低配模式（设置里切换，落盘持久化）：关掉氛围粒子，移动端更省电
+	_perf_low = bool(Save.setting("perf_low", false))
+	decor.set_low_perf(_perf_low)
 	get_viewport().size_changed.connect(_apply_ui_scale)
 	# 触屏控制层与物品栏点选（点格子直接切工具，触屏/鼠标通用）
 	# 触控层用独立 CanvasLayer（layer=2），不随设置里的 UI 缩放变化，按钮位置恒定
@@ -442,7 +465,16 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("load_game"):
 		if not sleeping and not Net.is_guest():
 			_do_load()
+	elif event.is_action_pressed("harvest_all"):
+		if not _panels_blocking():
+			_harvest_all()
+	elif event.is_action_pressed("water_all"):
+		if not _panels_blocking():
+			_water_all()
 	elif event.is_action_pressed("use"):
+		if _daily_open:
+			_toggle_daily(false)
+			return
 		if settings_open:
 			return
 		if help_open:
@@ -475,6 +507,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("ui_cancel"):
 		if _chat_open:
 			_chat_close()
+		elif _daily_open:
+			_toggle_daily(false)
 		elif settings_open:
 			_toggle_settings(false)
 		elif help_open:
@@ -503,7 +537,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			and event.pressed and not shop_open and not craft_open \
 			and not orders_open and not dex_open and place_mode == "" \
 			and not cook_open and not gift_open and not settings_open \
-			and not bundles_open:
+			and not bundles_open and not _daily_open:
 		_use_tool()
 
 
@@ -787,22 +821,26 @@ func _fishing_action() -> void:
 			fish_state = 3
 			_hooked_id = _pick_fish()
 			_fight_legend = _hooked_id == "legend"
-			_bar_y = 0.5
-			_bar_v = 0.0
-			_progress = 30.0
-			_fish_y = 0.5
-			_fish_target = randf()
-			_fish_timer = 0.0
+			_hits = 0
+			_misses = 0
+			_cursor_y = 0.0
+			_cursor_dir = 1.0
+			_hook_cd = 0.2  # 提竿这一下不算一次点击
+			_hit_flash = 0.0
+			_need_hits = 5 if _fight_legend else 3
+			_max_miss = 4 if _fight_legend else 3
+			# 鱼王绿区更窄；铜钓竿让绿区变大
+			_zone_half = (0.10 if _fight_legend else 0.16) + (0.03 if Game.rod_lv >= 2 else 0.0)
+			_next_zone()
 			_bobber.visible = false
 			_fish_icon.texture = TEX_FISH_GOLD if _fight_legend else TEX_FISH
 			_fish_icon.modulate = Color(1, 1, 1)
-			_fish_tip.text = "鱼王之战！按住 空格 抬起金条，罩住金色的鱼王！" \
-					if _fight_legend else "按住 空格 抬起绿条，罩住游动的鱼！"
 			_fish_root.visible = true
+			_update_fish_ui()
 			if _fight_legend:
-				_toast("水底金光大作——是鱼王！金条极难操控，稳住！")
+				_toast("水底金光大作——是鱼王！绿区很窄，稳住手！")
 			else:
-				_toast("按住空格抬起绿条，罩住游动的鱼！")
+				_toast("咬住了！光标进入绿区时按 空格 / 点击，命中 3 次就能拉上来")
 		3:
 			pass
 
@@ -843,48 +881,65 @@ func _update_fishing(delta: float) -> void:
 		_fight_update(delta)
 
 
+## 随机换一个新的绿区位置（不贴边）
+func _next_zone() -> void:
+	_zone_y = randf_range(_zone_half + 0.02, 1.0 - _zone_half - 0.02)
+
+
 func _fight_update(delta: float) -> void:
-	var hold := Input.is_action_pressed("use")
-	# 铜钓竿收线更稳：操控速度 x1.2
-	var ctrl := 880.0 * (1.2 if Game.rod_lv >= 2 else 1.0)
-	_bar_v += (-ctrl if hold else ctrl) * delta
-	_bar_v = clampf(_bar_v, -420.0, 420.0)
-	_bar_y += _bar_v * delta
-	if _bar_y < 0.09 or _bar_y > 0.91:
-		_bar_y = clampf(_bar_y, 0.09, 0.91)
-		_bar_v = 0.0
-	_fish_timer -= delta
-	if _fish_timer <= 0.0:
-		# 鱼王游动更鬼畜：换向更快
-		_fish_timer = randf_range(0.25, 0.6) if _fight_legend else randf_range(0.4, 1.0)
-		_fish_target = randf()
-	_fish_y = lerpf(_fish_y, _fish_target, 1.0 - pow(0.02, delta))
-	var overlap := absf(_fish_y - _bar_y) < 0.14
-	# 鱼王更凶猛：进度涨得慢、掉得快
-	var up := 30.0 if _fight_legend else 40.0
-	var down := 20.0 if _fight_legend else 24.0
-	_progress += (up if overlap else -down) * delta
-	_update_fish_ui(overlap)
-	if _progress >= 100.0:
-		_land_fish()
-	elif _progress <= 0.0:
-		_end_fishing()
-		_toast("鱼挣脱了……")
+	_hook_cd = maxf(_hook_cd - delta, 0.0)
+	_hit_flash = maxf(_hit_flash - delta, 0.0)
+	# 光标匀速上下扫，撞到两端反弹；鱼王更快，铜钓竿稍慢
+	var spd := (0.78 if _fight_legend else 0.52) - (0.07 if Game.rod_lv >= 2 else 0.0)
+	_cursor_y += _cursor_dir * spd * delta
+	if _cursor_y >= 1.0:
+		_cursor_y = 1.0
+		_cursor_dir = -1.0
+	elif _cursor_y <= 0.0:
+		_cursor_y = 0.0
+		_cursor_dir = 1.0
+	if _hook_cd <= 0.0 and Input.is_action_just_pressed("use"):
+		_hook_cd = 0.18
+		_hit_flash = 0.3
+		if absf(_cursor_y - _zone_y) <= _zone_half:
+			_hits += 1
+			_hit_ok = true
+			Sfx.play("coin")
+			_next_zone()
+			if _hits >= _need_hits:
+				_land_fish()
+				return
+		else:
+			_misses += 1
+			_hit_ok = false
+			Sfx.play("bite")
+			if _misses >= _max_miss:
+				_end_fishing()
+				_toast("鱼挣脱了……下次等光标进绿区再按")
+				return
+	_update_fish_ui()
 
 
-func _update_fish_ui(overlap: bool) -> void:
-	var bar_c := _bar_y * 240.0 - 120.0
-	_fish_bar.offset_top = bar_c - 20.0
-	_fish_bar.offset_bottom = bar_c + 20.0
-	if _fight_legend:  # 鱼王战：控制条变成金条
-		_fish_bar.color = Color(1, 0.85, 0.3, 0.8) if overlap else Color(0.8, 0.62, 0.18, 0.6)
+## 刷新钓鱼 UI：绿区 + 光标 + 命中进度 + 提示文案
+func _update_fish_ui() -> void:
+	var zc := _zone_y * 240.0 - 120.0
+	var zh := _zone_half * 240.0
+	_zone_rect.offset_top = zc - zh
+	_zone_rect.offset_bottom = zc + zh
+	if _hit_flash > 0.0:
+		_zone_rect.color = Color(0.62, 1.0, 0.5, 0.9) if _hit_ok else Color(1.0, 0.48, 0.42, 0.9)
 	else:
-		_fish_bar.color = Color(0.55, 0.92, 0.42, 0.6) if overlap else Color(0.35, 0.75, 0.32, 0.45)
-	var fish_c := _fish_y * 240.0 - 120.0
-	_fish_icon.offset_top = fish_c - 12.0
-	_fish_icon.offset_bottom = fish_c + 12.0
-	_prog_fill.offset_top = 118.0 - 236.0 * clampf(_progress, 0.0, 100.0) / 100.0
-	_prog_fill.color = Color(0.95, 0.75, 0.3) if _progress > 70.0 else Color(0.9, 0.5, 0.25)
+		_zone_rect.color = Color(0.35, 0.95, 0.45, 0.33)
+	var cc := _cursor_y * 240.0 - 120.0
+	_fish_bar.offset_top = cc - 3.0
+	_fish_bar.offset_bottom = cc + 3.0
+	_fish_bar.color = Color(1, 0.95, 0.75, 0.95)
+	_fish_icon.offset_top = cc - 12.0
+	_fish_icon.offset_bottom = cc + 12.0
+	_prog_fill.offset_top = 118.0 - 236.0 * float(_hits) / float(_need_hits)
+	_prog_fill.color = Color(0.45, 0.9, 0.5) if _hits < _need_hits else Color(0.98, 0.85, 0.35)
+	_fish_tip.text = "光标进绿区时按 空格 / 点击　命中 %d/%d · 失误 %d/%d" % [
+		_hits, _need_hits, _misses, _max_miss]
 
 
 ## 按时间/天气筛出当前可钓的鱼并按权重抽一条（铜钓竿让稀有鱼权重翻倍）
@@ -1337,10 +1392,132 @@ func _do_sleep(passed_out: bool) -> void:
 		_toast("%s睡了个好觉！第 %d 天，体力已回满%s%s%s" % [head, Game.day, rtail, fest_msg, tail])
 	if Net.is_host():
 		_net_full_now()  # 联机：把新的一天全量同步给 guest
+	_toggle_daily(true)  # 起床小报：天气 / 当季作物 / 订单 / 目标
+
+
+## 有会挡住世界输入的 UI 打开时返回 true（一键收获 / 浇水前判断）
+func _panels_blocking() -> bool:
+	return sleeping or settings_open or help_open or dex_open or bundles_open \
+			or orders_open or craft_open or cook_open or gift_open or dialog_open \
+			or shop_open or _daily_open
+
+
+## 一键收获：收下全农场成熟作物（每株 1 体力，体力不够就只收够的）
+func _harvest_all() -> void:
+	if Net.is_guest():
+		_toast("联机模式请逐格收获")
+		return
+	var cells: Array = []
+	for c in farm.tiles:
+		var t: Dictionary = farm.tiles[c]
+		if t.crop != "" and int(t.stage) >= int(Game.CROPS[t.crop].days):
+			cells.append(c)
+	if cells.is_empty():
+		_toast("农田里没有成熟作物")
+		return
+	var total := 0
+	var kinds := {}
+	for c in cells:
+		if not Game.use_stamina(1.0):
+			break
+		var got: String = farm.try_harvest(c)
+		if got == "":
+			continue
+		var n := int(Game.CROPS[got].get("yield", 1))
+		Game.add_harvest(got, n)
+		Game.total_harvest += n
+		Game.add_xp("farm", 6)
+		if _fest_kind(Game.day) == "harvest":
+			_fest_count += n
+		kinds[got] = int(kinds.get(got, 0)) + n
+		total += n
+		_float_text("+%d" % n, _cell_center(c), Color(1, 0.9, 0.35))
+	if total <= 0:
+		_toast("体力不够了，回床上睡一觉吧")
+		return
+	_guide_advance(3)
+	_goal_check()
+	Sfx.play("harvest")
+	player.pop()
+	var parts: Array = []
+	for k in kinds:
+		parts.append("%s x%d" % [Game.CROPS[k].name, kinds[k]])
+	_toast("一键收获 %d 个：%s" % [total, "、".join(parts)])
+
+
+## 一键浇水：给所有没浇过水的土地浇水（每格 1 体力）
+func _water_all() -> void:
+	if Net.is_guest():
+		_toast("联机模式请逐格浇水")
+		return
+	var cells: Array = []
+	for c in farm.tiles:
+		if not bool(farm.tiles[c].watered):
+			cells.append(c)
+	if cells.is_empty():
+		_toast("所有土地都浇过水了")
+		return
+	var done := 0
+	for c in cells:
+		if not Game.use_stamina(1.0):
+			break
+		if farm.try_water(c) == "":
+			done += 1
+	if done <= 0:
+		_toast("体力不够了，回床上睡一觉吧")
+		return
+	_guide_advance(1)
+	_goal_check()
+	Sfx.play("water")
+	player.pop()
+	_toast("一键浇水：浇了 %d 块地（剩余体力 %d）" % [done, int(Game.stamina)])
+
+
+## 目标指引箭头要指向的位置；没有明确目标时返回 null
+func goal_target():
+	if _panels_blocking() or place_mode != "":
+		return null
+	# 1) 有成熟作物：指向作物群中心
+	var mid := Vector2i.ZERO
+	var cnt := 0
+	for c in farm.tiles:
+		var t: Dictionary = farm.tiles[c]
+		if t.crop != "" and int(t.stage) >= int(Game.CROPS[t.crop].days):
+			mid += c
+			cnt += 1
+	if cnt > 0:
+		mid = Vector2i(mid.x / cnt, mid.y / cnt)
+		return _cell_center(mid)
+	# 2) 有没做的订单：指向订单板
+	for o in _orders:
+		if not bool(o.done):
+			return decor.BOARD_POS
+	# 3) 新手引导未完成：锄地/播种/收获指向农田，卖货指向货摊
+	if Game.guide_step < Game.GUIDE_STEPS.size():
+		if Game.guide_step >= 4:
+			return decor.SHOP_POS
+		var n := 0
+		var acc := Vector2i.ZERO
+		for c in farm.tiles:
+			acc += c
+			n += 1
+		if n > 0:
+			return _cell_center(Vector2i(acc.x / n, acc.y / n))
+		return _cell_center(Vector2i(0, 0)) if farm.tiles.has(Vector2i(0, 0)) else null
+	# 4) 种子全部用光：指向商店
+	var seeds := Game.seeds as Dictionary
+	var left := 0
+	for k in seeds:
+		left += int(seeds[k])
+	if left <= 0:
+		return decor.SHOP_POS
+	return null
 
 
 ## 关闭所有已打开的面板（睡觉/联机读档前调用）
 func _close_panels() -> void:
+	if _daily_open:
+		_toggle_daily(false)
 	if settings_open:
 		_toggle_settings(false)
 	if shop_open:
@@ -3023,6 +3200,7 @@ func _build_help() -> void:
 	_help_section(col_l, "基础操作", [
 		"WASD / 方向键 移动　　空格 / 鼠标左键 使用工具　　E 互动",
 		"1-0 切换工具　　C 制作　　H 帮助　　Esc 设置 / 关闭　　F5 存档 / F9 读档　　M 音乐",
+		"J 一键收获全田成熟作物　　K 一键给全田浇水（每格 1 体力）",
 		"Tab 小地图放大缩小　　T 和联机好友打字聊天",
 	])
 	_help_section(col_l, "种田流程", [
@@ -3039,9 +3217,10 @@ func _build_help() -> void:
 	])
 	_help_section(col_l, "钓鱼（7 鱼竿）", [
 		"池塘边空格甩竿 → 浮漂变红瞬间再按空格提竿",
-		"按住空格抬起绿条罩住游动的鱼；虹鳟只在 18:00 后，月光鱼 20:00 后、雨鱼雨天",
-		"商店可升铜钓竿（1800g+铜x5）：收线更稳，稀有鱼出现率翻倍",
-		"传说鱼王上钩会变成金条挑战（极凶猛），钓起价值 1200g；12% 概率钓上宝箱",
+		"光标进入绿区时按空格（手机上点「用」）算命中，命中 3 次、失误 3 次内就能拉上来；鱼王需命中 5 次",
+		"虹鳟只在 18:00 后，月光鱼 20:00 后、雨鱼雨天；雨天鱼更容易上钩",
+		"商店可升铜钓竿（1800g+铜x5）：绿区更大、光标更慢，稀有鱼出现率翻倍",
+		"传说鱼王上钩时绿区很窄（价值 1200g）；12% 概率钓上宝箱",
 	])
 	_help_section(col_l, "采集与制作（8 斧镐 / C 制作）", [
 		"敲石头得石料、敲树枝得木材，北边野莓丛按 E 采摘野莓，每天会补充刷新",
@@ -3075,6 +3254,7 @@ func _build_help() -> void:
 		"养鸡 800g/只（最多4）每天下蛋；奶牛 2500g、绵羊 2000g 住畜棚产奶产毛",
 		"七天阶段目标显示在左上「今日目标」，达成自动发金币与对应季节种子",
 		"B 打开收集包：交作物/鱼/矿石/牧产换金币 + 永久体力上限",
+		"每天起床会弹「农场小报」：天气、当季作物、订单与节日提醒；Esc/空格关闭",
 	])
 	_help_section(col_r, "图鉴·技能·存档（G）", [
 		"按 G 打开面板：技能等级、6 种鱼类图鉴（含鱼王）、宝箱与成就进度",
@@ -3100,6 +3280,117 @@ func _toggle_help(open: bool) -> void:
 	help_panel.visible = open
 
 
+# ---------- 每日农场小报 ----------
+
+## 起床小报面板：天气 / 当季作物 / 订单 / 节日 / 七日目标 / 一句建议
+func _build_daily() -> void:
+	_daily_panel = PanelContainer.new()
+	_daily_panel.anchor_left = 0.5
+	_daily_panel.anchor_top = 0.5
+	_daily_panel.anchor_right = 0.5
+	_daily_panel.anchor_bottom = 0.5
+	_daily_panel.offset_left = -300.0
+	_daily_panel.offset_top = -152.0
+	_daily_panel.offset_right = 300.0
+	_daily_panel.offset_bottom = 152.0
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.13, 0.11, 0.08, 0.98)
+	sb.border_color = Color(0.42, 0.33, 0.2)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(8)
+	sb.content_margin_left = 18.0
+	sb.content_margin_right = 18.0
+	sb.content_margin_top = 14.0
+	sb.content_margin_bottom = 14.0
+	_daily_panel.add_theme_stylebox_override("panel", sb)
+	_daily_panel.visible = false
+	$UI.add_child(_daily_panel)
+	_daily_vb = VBoxContainer.new()
+	_daily_vb.add_theme_constant_override("separation", 8)
+	_daily_panel.add_child(_daily_vb)
+	var pad := Control.new()
+	pad.custom_minimum_size = Vector2(560, 0)
+	_daily_vb.add_child(pad)
+	var title := _mk_label("农 场 小 报", 22)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_daily_vb.add_child(title)
+	_daily_vb.add_child(HSeparator.new())
+	_daily_text = _mk_label("", 14)
+	_daily_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_daily_text.custom_minimum_size = Vector2(560, 0)
+	_daily_vb.add_child(_daily_text)
+	var back := _mk_btn("开始今天（空格 / E）")
+	back.custom_minimum_size = Vector2(0, 38)
+	back.pressed.connect(func() -> void: _toggle_daily(false))
+	_daily_vb.add_child(back)
+
+
+func _toggle_daily(open: bool) -> void:
+	_daily_open = open
+	if _daily_panel != null:
+		_daily_panel.visible = open
+	if open:
+		_refresh_daily()
+
+
+func _refresh_daily() -> void:
+	if _daily_text == null:
+		return
+	var lines: Array = []
+	lines.append("第 %d 天 · %s季 %d/%d · %s" % [Game.day, Game.season_name(),
+		Game.season_day(), Game.SEASON_DAYS, _weather_name()])
+	# 天气与农事建议
+	if weather == "rain":
+		lines.append("今早下雨：露天农田已自动浇好，钓鱼更爱咬钩。")
+	elif weather == "snow":
+		lines.append("今天下雪：露天作物不长，温室里照常生长，也可以去矿洞。")
+	else:
+		lines.append("今天晴天：记得给作物浇水（K 一键浇全田）。")
+	# 当季可种
+	var crops: Array = []
+	for id in Game.CROPS:
+		if Game.can_plant(id):
+			crops.append(Game.CROPS[id].name)
+	lines.append("当季可种：" + ("、".join(crops) if not crops.is_empty() else "无（去温室）"))
+	# 订单板
+	var todo := 0
+	var gold_sum := 0
+	for o in _orders:
+		if not bool(o.done):
+			todo += 1
+			gold_sum += int(o.gold) * int(o.n)
+	if todo > 0:
+		lines.append("订单板：还有 %d 张没交，全做完可得 %d 金币（牌子在货摊东侧）" % [todo, gold_sum])
+	# 节日
+	var fk := _fest_kind(Game.day)
+	if fk != "":
+		var cfg: Dictionary = FESTS[fk]
+		lines.append("今天是%s：%s %d 个达标，睡前奖励 %d 金币！" % [
+			cfg.name, cfg.unit, int(cfg.goal), int(cfg.reward)])
+	# 七日目标
+	if Game.day <= 7:
+		var g = null
+		for gd in Game.DAY_GOALS:
+			if int(gd.day) == Game.day:
+				g = gd
+				break
+		if g != null and not Game.goals_claimed.has(Game.day):
+			lines.append("今日目标：%s（进度 %d/%d）" % [
+				g.name, Game.goal_progress(g.kind), int(g.n)])
+	# 一句建议（按当前状态给不同提示，防劝退）
+	var tip := ""
+	if Game.stamina < Game.max_stamina * 0.3:
+		tip = "体力快见底了：早点回床睡觉，第二天会回满。"
+	elif Game.seeds.get("parsnip", 0) + Game.seeds.get("potato", 0) == 0 and Game.guide_step < 2:
+		tip = "没种子了？去货摊（东边）买，防风草最便宜。"
+	elif not Game.greenhouse_built and Game.gold >= Game.GH_COST:
+		tip = "金币够了！商店里可以买温室，冬天也能种菜。"
+	else:
+		tip = "有空按 B 看看收集包，交作物能永久提升体力上限。"
+	lines.append("小建议：" + tip)
+	_daily_text.text = "\n".join(lines)
+
+
 # ---------- 设置面板 ----------
 
 ## 设置面板：音乐/音效开关与音量、触屏按钮、界面缩放、全屏、返回
@@ -3120,9 +3411,9 @@ func _build_settings() -> void:
 	_settings_panel.anchor_right = 0.5
 	_settings_panel.anchor_bottom = 0.5
 	_settings_panel.offset_left = -250.0
-	_settings_panel.offset_top = -212.0
+	_settings_panel.offset_top = -290.0
 	_settings_panel.offset_right = 250.0
-	_settings_panel.offset_bottom = 212.0
+	_settings_panel.offset_bottom = 290.0
 	_settings_panel.visible = false
 	# 实色底板：设置面板盖在压暗的场景/标题之上，避免下层文字透出来
 	var sb := StyleBoxFlat.new()
@@ -3181,6 +3472,41 @@ func _build_settings() -> void:
 	_set_fs_btn.custom_minimum_size = Vector2(110, 32)
 	_set_fs_btn.pressed.connect(_on_fullscreen_toggle)
 	row_f.add_child(_set_fs_btn)
+	# 低配模式：关掉氛围粒子与萤火，移动端省电
+	var row_p := _settings_row(vb, "低配模式")
+	_set_perf_btn = _mk_btn("关闭")
+	_set_perf_btn.custom_minimum_size = Vector2(110, 32)
+	_set_perf_btn.pressed.connect(_on_perf_toggle)
+	row_p.add_child(_set_perf_btn)
+	vb.add_child(HSeparator.new())
+	# 存档操作：保存 / 读取
+	var row_sv := HBoxContainer.new()
+	row_sv.add_theme_constant_override("separation", 10)
+	vb.add_child(row_sv)
+	var b_save := _mk_btn("保存进度（F5）")
+	b_save.custom_minimum_size = Vector2(0, 36)
+	b_save.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b_save.pressed.connect(func() -> void: _do_save())
+	row_sv.add_child(b_save)
+	var b_load := _mk_btn("读取存档（F9）")
+	b_load.custom_minimum_size = Vector2(0, 36)
+	b_load.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b_load.pressed.connect(func() -> void: _do_load())
+	row_sv.add_child(b_load)
+	# 新游戏 / 返回标题
+	var row_ng := HBoxContainer.new()
+	row_ng.add_theme_constant_override("separation", 10)
+	vb.add_child(row_ng)
+	_set_new_btn = _mk_btn("开始新游戏")
+	_set_new_btn.custom_minimum_size = Vector2(0, 36)
+	_set_new_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_set_new_btn.pressed.connect(_settings_new_game)
+	row_ng.add_child(_set_new_btn)
+	var b_title := _mk_btn("返回标题画面")
+	b_title.custom_minimum_size = Vector2(0, 36)
+	b_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b_title.pressed.connect(_settings_back_title)
+	row_ng.add_child(b_title)
 	var tip := _mk_label("Esc 随时打开或关闭设置 · 手机上触屏按钮会自动出现", 12)
 	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	tip.custom_minimum_size = Vector2(460, 0)
@@ -3240,6 +3566,37 @@ func _toggle_settings(open: bool) -> void:
 		_refresh_settings_ui()
 
 
+## 低配模式：关掉氛围粒子/萤火/云影，落盘持久化
+func _on_perf_toggle() -> void:
+	_perf_low = not _perf_low
+	Save.set_setting("perf_low", _perf_low)
+	decor.set_low_perf(_perf_low)
+	_refresh_settings_ui()
+	_toast("低配模式已%s：氛围粒子与萤火%s" % [
+		"开启" if _perf_low else "关闭", "已关闭" if _perf_low else "已恢复"])
+
+
+## 设置里开始新游戏：二次确认后清档重来
+func _settings_new_game() -> void:
+	if not _settings_new_confirm:
+		_settings_new_confirm = true
+		_refresh_settings_ui()
+		_toast("新游戏会清空当前存档与农场，再点一次确认")
+		return
+	_settings_new_confirm = false
+	_start_new_game()
+	_toggle_settings(false)
+	_toast("新的春天开始了！按 H 看操作说明")
+
+
+## 设置里返回标题：先自动存档，再回到开局面板
+func _settings_back_title() -> void:
+	_toggle_settings(false)
+	_autosave()
+	if _boot_panel == null:
+		_build_boot()
+
+
 ## 把面板上的按钮/滑条状态刷成当前实际配置
 func _refresh_settings_ui() -> void:
 	if _settings_panel == null:
@@ -3253,6 +3610,8 @@ func _refresh_settings_ui() -> void:
 	_set_sfx_slider.set_value_no_signal(sv)
 	_set_sfx_pct.text = "%d%%" % sv
 	_set_touch_btn.text = _touch_label()
+	_set_perf_btn.text = "开启" if _perf_low else "关闭"
+	_set_new_btn.text = "再点一次：清空存档重来" if _settings_new_confirm else "开始新游戏"
 	_set_scale_btn.text = "%d%%" % int(roundf(float(Save.setting("ui_scale", 1.0)) * 100.0))
 	var fs: bool = DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
 	_set_fs_btn.text = "退出全屏" if fs else "进入全屏"
@@ -3405,6 +3764,18 @@ func _build_fishing_ui() -> void:
 	track.offset_right = -56.0
 	track.offset_bottom = 120.0
 	_fish_root.add_child(track)
+	# 绿区：命中判定的目标带（在轨道内上下随机出现）
+	_zone_rect = ColorRect.new()
+	_zone_rect.color = Color(0.35, 0.95, 0.45, 0.33)
+	_zone_rect.anchor_left = 0.5
+	_zone_rect.anchor_top = 0.5
+	_zone_rect.anchor_right = 0.5
+	_zone_rect.anchor_bottom = 0.5
+	_zone_rect.offset_left = -84.0
+	_zone_rect.offset_top = -30.0
+	_zone_rect.offset_right = -56.0
+	_zone_rect.offset_bottom = 30.0
+	_fish_root.add_child(_zone_rect)
 	_fish_bar = ColorRect.new()
 	_fish_bar.color = Color(0.35, 0.75, 0.32, 0.45)
 	_fish_bar.anchor_left = 0.5
@@ -3451,7 +3822,7 @@ func _build_fishing_ui() -> void:
 	_prog_fill.offset_right = -31.0
 	_prog_fill.offset_bottom = 118.0
 	_fish_root.add_child(_prog_fill)
-	var tip := _mk_label("按住 空格 抬起绿条，罩住游动的鱼", 14)
+	var tip := _mk_label("光标进绿区时按 空格 / 点击", 14)
 	tip.anchor_left = 0.5
 	tip.anchor_top = 0.5
 	tip.anchor_right = 0.5
@@ -3715,6 +4086,10 @@ func _build_hud_extras() -> void:
 	_arrow = FriendArrowScript.new()
 	_arrow.main = self
 	$UI.add_child(_arrow)
+	# 目标指引箭头（黄色，指向成熟作物 / 订单板 / 商店）
+	_goal_arrow = GoalArrowScript.new()
+	_goal_arrow.main = self
+	$UI.add_child(_goal_arrow)
 	_chat_log = VBoxContainer.new()
 	_chat_log.anchor_top = 1.0
 	_chat_log.anchor_bottom = 1.0
