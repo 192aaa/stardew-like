@@ -9,6 +9,9 @@ const MINUTES_PER_SECOND := 12.0  # 现实 90 秒 = 游戏 1 天
 enum Tool { HOE, CAN, SEED_PARSNIP, SEED_POTATO, SEED_STRAW, SEED_PUMP, SEED_CORN, SEED_BLUE, ROD, AXE }
 
 const TOOL_NAMES := ["锄头", "水壶", "防风草种", "土豆种", "草莓种", "南瓜种", "玉米种", "蓝莓种", "鱼竿", "斧镐"]
+## 物品栏槽位（1锄 2壶 3-6 春种 9玉米 0蓝莓 7鱼竿 8斧镐）→ 工具枚举，点选与高亮共用
+const TOOL_OF_SLOT := [Tool.HOE, Tool.CAN, Tool.SEED_PARSNIP, Tool.SEED_POTATO,
+	Tool.SEED_STRAW, Tool.SEED_PUMP, Tool.SEED_CORN, Tool.SEED_BLUE, Tool.ROD, Tool.AXE]
 const TOOL_SEED := {
 	Tool.SEED_PARSNIP: "parsnip", Tool.SEED_POTATO: "potato",
 	Tool.SEED_STRAW: "straw", Tool.SEED_PUMP: "pumpkin",
@@ -23,6 +26,7 @@ const TEX_WOOL := preload("res://assets/wool.png")
 const RainScript := preload("res://scripts/rain.gd")
 const MinimapScript := preload("res://scripts/minimap.gd")
 const FriendArrowScript := preload("res://scripts/friend_arrow.gd")
+const TouchScript := preload("res://scripts/touch_controls.gd")
 const TEX_GRASS_SNOW := preload("res://assets/grass_snow.png")
 const TEX_PATCH_SNOW := [
 	preload("res://assets/patch_snow1.png"),
@@ -255,6 +259,8 @@ var _set_music_slider: HSlider
 var _set_sfx_slider: HSlider
 var _set_music_pct: Label
 var _set_sfx_pct: Label
+# 触屏控制层（虚拟摇杆 + 动作按钮），由 touch_controls.gd 实现
+var _touch
 
 
 func _ready() -> void:
@@ -314,6 +320,20 @@ func _ready() -> void:
 	_build_settings()
 	_apply_settings()
 	get_viewport().size_changed.connect(_apply_ui_scale)
+	# 触屏控制层与物品栏点选（点格子直接切工具，触屏/鼠标通用）
+	# 触控层用独立 CanvasLayer（layer=2），不随设置里的 UI 缩放变化，按钮位置恒定
+	_touch = TouchScript.new()
+	_touch.main = self
+	var tl := CanvasLayer.new()
+	tl.name = "TouchLayer"
+	tl.layer = 2
+	add_child(tl)
+	tl.add_child(_touch)
+	_touch.refresh_mode()
+	for i in _slot_panels.size():
+		var sp: Control = _slot_panels[i]
+		sp.mouse_filter = Control.MOUSE_FILTER_STOP
+		sp.gui_input.connect(_on_slot_gui_input.bind(i))
 
 
 func _process(delta: float) -> void:
@@ -2989,7 +3009,16 @@ func _on_touch_cycle() -> void:
 	var cur := String(Save.setting("touch_buttons", "auto"))
 	var next := "on" if cur == "auto" else ("off" if cur == "on" else "auto")
 	Save.set_setting("touch_buttons", next)
+	if _touch != null:
+		_touch.refresh_mode()
 	_refresh_settings_ui()
+
+
+## 点物品栏格子直接切换工具（触屏点选 / 鼠标点选通用）
+func _on_slot_gui_input(e: InputEvent, i: int) -> void:
+	if (e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT and e.pressed) \
+			or (e is InputEventScreenTouch and e.pressed):
+		_switch_tool(TOOL_OF_SLOT[i])
 
 
 ## 界面缩放三档：100% → 115% → 130%（只放大 UI 层，世界画面不变）
@@ -3138,10 +3167,9 @@ func _refresh_hud() -> void:
 		"7 %s" % ("铜钓竿" if Game.rod_lv >= 2 else "鱼竿"),
 		"8 斧镐",
 	]
-	# 槽位顺序：1锄 2壶 3-6作物种 | 槽7=玉米种(9) 槽8=蓝莓种(0) 槽9=鱼竿(7) 槽10=斧镐(8)
-	var tool_of_slot := [0, 1, 2, 3, 4, 5, 8, 9, 6, 7]
+	# 槽位顺序：1锄 2壶 3-6 春种 | 9玉米 0蓝莓 7鱼竿 8斧镐（与 TOOL_OF_SLOT 一致）
 	for i in 10:
-		var ti: int = tool_of_slot[i]
+		var ti: int = TOOL_OF_SLOT[i]
 		var active: bool = current_tool == ti
 		_slot_labels[i].text = ("▶ " + texts[i]) if active else texts[i]
 		_slot_panels[i].self_modulate = Color(1, 1, 0.62) if active else Color(1, 1, 1, 0.82)
@@ -3224,8 +3252,10 @@ func _refresh_hud() -> void:
 
 func _update_hint() -> void:
 	var txt: String
+	var touch: bool = _touch != null and bool(_touch._enabled)
 	if place_mode != "":
-		txt = "移动到目标格子按空格放置（Esc 取消）"
+		txt = "走到目标格子点「用」放置（「设置」=取消）" if touch \
+				else "移动到目标格子按空格放置（Esc 取消）"
 	elif _near_pet() != null:
 		txt = "按 E 摸摸%s的头：心情 +30，每天一次" % _near_pet().pet_name
 	elif _near_villager() != null:
@@ -3268,7 +3298,8 @@ func _update_hint() -> void:
 	elif decor.POND_RECT.grow(30.0).has_point(player.position):
 		txt = "水边适合钓鱼：7 甩竿 · 咬钩后再按空格"
 	else:
-		txt = "1-0 切换工具 · 空格/左键 使用 · C 制作 · E 互动 · H 帮助"
+		txt = "点物品栏换工具 · 「用」使用 · 「互动」E · 「菜单」里制作/存档" if touch \
+				else "1-0 切换工具 · 空格/左键 使用 · C 制作 · E 互动 · H 帮助"
 	if hint_label.text != txt:
 		hint_label.text = txt
 
