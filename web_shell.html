@@ -2,7 +2,11 @@
 <html lang="zh-CN">
 	<head>
 		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+		<meta name="apple-mobile-web-app-capable" content="yes">
+		<meta name="mobile-web-app-capable" content="yes">
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+		<meta name="theme-color" content="#0d1410">
 		<title>$GODOT_PROJECT_NAME</title>
 		<style>
 html, body, #canvas {
@@ -331,6 +335,17 @@ const engine = new Engine(GODOT_CONFIG);
 	} else {
 		setStatusMode('progress');
 		let shownStage = 1;
+		// 手机首次点击画面时尝试进入真全屏：Android Chrome / iPad Safari 支持，
+		// iPhone 的 Safari 与微信内置浏览器不支持元素全屏，会自动静默跳过
+		if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
+			const fsTarget = document.documentElement;
+			window.addEventListener('pointerdown', function () {
+				if (!document.fullscreenElement && fsTarget.requestFullscreen) {
+					fsTarget.requestFullscreen({navigationUI: 'hide'}).catch(function () {});
+				}
+			}, {once: true});
+		}
+
 		engine.startGame({
 			'onProgress': function (current, total) {
 				if (current > 0 && total > 0) {

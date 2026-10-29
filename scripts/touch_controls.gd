@@ -6,11 +6,14 @@ extends Control
 
 var main
 
-const JOY_AREA := Rect2(0, 290, 330, 280)  # 摇杆感应区（画布坐标，外扩 24px 判定）
-const BASE := Vector2(150, 470)            # 摇杆底座中心
+## 位置随画布尺寸动态计算（stretch 用 expand 后画布宽度会随手机屏幕比例变化，
+## 所以按钮必须贴右/贴底锚定，不能写死坐标）；数值以 1280x720 为基准换算
 const BASE_R := 95.0
 const KNOB_R := 42.0
 const DEAD := 0.16                         # 摇杆死区（比例）
+
+var JOY_AREA := Rect2(0, 290, 330, 280)    # 摇杆感应区（画布坐标，外扩 24px 判定）
+var BASE := Vector2(150, 470)              # 摇杆底座中心
 
 var _enabled := false
 var _joy_active := false
@@ -28,18 +31,20 @@ var _last_btn_ms := 0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	set_anchors_preset(Control.PRESET_FULL_RECT)
-	_btn_use = _mk_btn("用", Vector2(1150, 560), 58.0, 30)
+	# 不用 FULL_RECT 锚点：CanvasLayer 下的锚点尺寸会被引擎在 _ready 后重算，
+	# 与手动 size 冲突并刷 WARNING，这里改为完全手动同步视口尺寸
+	position = Vector2.ZERO
+	_btn_use = _mk_btn("用", Vector2.ZERO, 58.0, 30)
 	_btn_use.button_down.connect(_on_use_down)
 	_btn_use.button_up.connect(_on_use_up)
 	add_child(_btn_use)
-	_btn_act = _mk_btn("互动", Vector2(1006, 592), 40.0, 16)
+	_btn_act = _mk_btn("互动", Vector2.ZERO, 40.0, 16)
 	_btn_act.button_down.connect(_on_act_down)
 	add_child(_btn_act)
-	_btn_more = _mk_btn("菜单", Vector2(1216, 452), 34.0, 14)
+	_btn_more = _mk_btn("菜单", Vector2.ZERO, 34.0, 14)
 	_btn_more.pressed.connect(_on_more_pressed)
 	add_child(_btn_more)
-	_btn_set = _mk_btn("设置", Vector2(1052, 478), 34.0, 14)
+	_btn_set = _mk_btn("设置", Vector2.ZERO, 34.0, 14)
 	_btn_set.pressed.connect(_on_set_pressed)
 	add_child(_btn_set)
 	_build_menu()
@@ -47,7 +52,39 @@ func _ready() -> void:
 	_use_timer.wait_time = 0.4
 	_use_timer.timeout.connect(_on_use_repeat)
 	add_child(_use_timer)
+	resized.connect(_layout)
+	get_viewport().size_changed.connect(_sync_size)
+	_sync_size()
 	visible = false
+
+
+## CanvasLayer 下的 Control 不会自动跟随视口尺寸，这里手动同步（旋转/全屏切换都会触发）
+func _sync_size() -> void:
+	size = get_viewport().get_visible_rect().size
+	_layout()
+
+
+## 按当前画布尺寸摆放摇杆与按钮：右/下边缘固定距离，屏幕再宽再长都不会跑偏
+func _layout() -> void:
+	var w := size.x
+	var h := size.y
+	if w <= 0.0 or h <= 0.0:
+		return
+	BASE = Vector2(150.0, h - 250.0)
+	JOY_AREA = Rect2(0.0, BASE.y - 180.0, 330.0, 280.0)
+	_knob = BASE
+	if _btn_use != null:
+		_place(_btn_use, Vector2(w - 130.0, h - 160.0))
+		_place(_btn_act, Vector2(w - 274.0, h - 128.0))
+		_place(_btn_more, Vector2(w - 64.0, h - 268.0))
+		_place(_btn_set, Vector2(w - 228.0, h - 242.0))
+	if _menu != null:
+		_menu.position = Vector2(w - 538.0, h * 0.47)
+	queue_redraw()
+
+
+func _place(b: Button, center: Vector2) -> void:
+	b.position = center - b.size * 0.5
 
 
 ## 菜单弹窗：手机上没有键盘，把 C/G/H/T/Tab/F5/F9 的功能收进这里
