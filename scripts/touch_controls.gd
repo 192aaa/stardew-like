@@ -125,13 +125,35 @@ func refresh_mode() -> void:
 	elif mode == "off":
 		_enabled = false
 	else:
-		_enabled = DisplayServer.is_touchscreen_available() \
-				or OS.has_feature("mobile") or OS.has_feature("web_android") \
-				or OS.has_feature("web_ios")
+		_enabled = _detect_touch()
 	if not _enabled and _joy_active:
 		_joy_end()
 	visible = _enabled and not _blocked()
-	queue_redraw()
+	if _enabled:
+		queue_redraw()
+
+
+## 触摸设备检测：引擎的 is_touchscreen_available() 在 iOS Safari / 微信内置浏览器
+## 常常返回 false，导致摇杆与按钮完全不显示，所以再补一层 JS 探测；
+## 另外支持 URL 参数强制覆盖（?touch=1 强制开 / ?touch=0 强制关），方便排查
+func _detect_touch() -> bool:
+	if OS.has_feature("web"):
+		var q := str(JavaScriptBridge.eval("window.location.search", true))
+		if q.contains("touch=1"):
+			return true
+		if q.contains("touch=0"):
+			return false
+	if OS.has_feature("mobile") or OS.has_feature("web_android") or OS.has_feature("web_ios"):
+		return true
+	if DisplayServer.is_touchscreen_available():
+		return true
+	if OS.has_feature("web"):
+		# maxTouchPoints > 0 / ontouchstart / 指针为 coarse（触屏）任一成立即视为触屏设备
+		var v = JavaScriptBridge.eval(
+			"(navigator.maxTouchPoints > 0) || ('ontouchstart' in window)"
+			+ " || window.matchMedia('(pointer: coarse)').matches", true)
+		return bool(v)
+	return false
 
 
 ## 有面板/睡觉/开局/聊天时收起触控层，回到纯键盘或面板交互
