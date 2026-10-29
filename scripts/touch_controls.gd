@@ -79,7 +79,9 @@ func _layout() -> void:
 		_place(_btn_more, Vector2(w - 64.0, h - 268.0))
 		_place(_btn_set, Vector2(w - 228.0, h - 242.0))
 	if _menu != null:
-		_menu.position = Vector2(w - 538.0, h * 0.47)
+		# 菜单改为贴右下：条目数变多后按 0.47 高度摆会溢出屏幕底部
+		var ms := _menu.get_combined_minimum_size()
+		_menu.position = Vector2(w - ms.x - 20.0, h - ms.y - 16.0)
 	queue_redraw()
 
 
@@ -105,7 +107,7 @@ func _build_menu() -> void:
 	vb.add_theme_constant_override("separation", 6)
 	_menu.add_child(vb)
 	for item in [
-		["收获全部", "harvest_all"], ["浇水全部", "water_all"],
+		["目标", "goals"], ["收获全部", "harvest_all"], ["浇水全部", "water_all"],
 		["制作", "craft"], ["图鉴", "codex"], ["收集包", "bundle"], ["帮助", "help"],
 		["聊天", "chat"], ["地图", "minimap"], ["存档", "save_game"],
 		["读档", "load_game"],
@@ -200,6 +202,7 @@ func _blocked() -> bool:
 			or main.settings_open or main.help_open or main.dex_open \
 			or main.orders_open or main.bundles_open or main.shop_open or main.craft_open \
 			or main.cook_open or main.gift_open or main.dialog_open \
+			or main.goals_open \
 			or main._boot_panel != null
 
 

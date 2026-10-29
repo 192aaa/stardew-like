@@ -292,6 +292,11 @@ var _bundles_panel: PanelContainer
 var _bundle_descs: Array = []
 var _bundle_btns: Array = []
 var _gh_btn: Button
+# 目标清单面板（Y 键）：七日目标像成就一样随时可看，过期未完成也不会消失
+var goals_open := false
+var _goals_panel: PanelContainer
+var _goals_head: Label
+var _goals_labels: Array = []
 
 
 func _ready() -> void:
@@ -321,6 +326,7 @@ func _ready() -> void:
 	_build_dialog()
 	_build_hud_extras()
 	_build_guide()
+	_build_goals()
 	_build_bundles()
 	_build_daily()
 	_rain_node = RainScript.new()
@@ -444,6 +450,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_toast("背景音乐已%s（M 切换）" % ("开启" if not m else "关闭"))
 	elif event.is_action_pressed("codex"):
 		_toggle_dex(not dex_open)
+	elif event.is_action_pressed("goals"):
+		_toggle_goals(not goals_open)
 	elif event.is_action_pressed("bundle"):
 		_toggle_bundles(not bundles_open)
 	elif event.is_action_pressed("minimap"):
@@ -481,6 +489,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_help(false)
 		elif dex_open:
 			_toggle_dex(false)
+		elif goals_open:
+			_toggle_goals(false)
 		elif bundles_open:
 			_toggle_bundles(false)
 		elif orders_open:
@@ -515,6 +525,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_help(false)
 		elif dex_open:
 			_toggle_dex(false)
+		elif goals_open:
+			_toggle_goals(false)
 		elif bundles_open:
 			_toggle_bundles(false)
 		elif orders_open:
@@ -537,7 +549,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			and event.pressed and not shop_open and not craft_open \
 			and not orders_open and not dex_open and place_mode == "" \
 			and not cook_open and not gift_open and not settings_open \
-			and not bundles_open and not _daily_open:
+			and not bundles_open and not _daily_open and not goals_open:
 		_use_tool()
 
 
@@ -550,6 +562,8 @@ func _interact_chain() -> void:
 		_toggle_help(false)
 	elif dex_open:
 		_toggle_dex(false)
+	elif goals_open:
+		_toggle_goals(false)
 	elif bundles_open:
 		_toggle_bundles(false)
 	elif orders_open:
@@ -1399,7 +1413,7 @@ func _do_sleep(passed_out: bool) -> void:
 func _panels_blocking() -> bool:
 	return sleeping or settings_open or help_open or dex_open or bundles_open \
 			or orders_open or craft_open or cook_open or gift_open or dialog_open \
-			or shop_open or _daily_open
+			or shop_open or _daily_open or goals_open
 
 
 ## 一键收获：收下全农场成熟作物（每株 1 体力，体力不够就只收够的）
@@ -1530,6 +1544,8 @@ func _close_panels() -> void:
 		_toggle_orders(false)
 	if dex_open:
 		_toggle_dex(false)
+	if goals_open:
+		_toggle_goals(false)
 	if bundles_open:
 		_toggle_bundles(false)
 	if cook_open:
@@ -2651,32 +2667,120 @@ func _goal_check() -> void:
 	_goal_refresh()
 
 
-## 今日目标行：显示阶段目标与进度；当天已完成则预告下一条
+## 今日目标行：永远显示「最早一条未完成的目标」——当天没做完的第二天仍然挂着，
+## 不会消失；全部完成才变成祝贺语
 func _goal_refresh() -> void:
 	if _goal_label == null:
 		return
 	var done := Game.goals_claimed.size()
 	if done >= Game.DAY_GOALS.size():
-		_goal_label.text = "七日目标全部完成 · 农场稳步走上正轨！"
+		_goal_label.text = "七日目标全部完成 · 农场稳步走上正轨（Y 看清单）"
+		if goals_open:
+			_refresh_goals()
 		return
-	var g: Dictionary = Game.DAY_GOALS[clampi(Game.day, 1, 7) - 1]
+	var g: Dictionary = {}
+	for gg in Game.DAY_GOALS:
+		if not Game.goals_claimed.has(int(gg.day)):
+			g = gg
+			break
 	var tag := "今日目标"
-	if Game.day > Game.DAY_GOALS.size():
-		# 7 天以后只提示还能补领的目标
-		tag = "可补领"
-		for gg in Game.DAY_GOALS:
-			if not Game.goals_claimed.has(int(gg.day)):
-				g = gg
-				break
-	elif Game.goals_claimed.has(int(g.day)):
+	if int(g.day) < Game.day:
+		tag = "补做目标"
+	elif int(g.day) > Game.day:
 		tag = "下一目标"
-		for gg in Game.DAY_GOALS:
-			if not Game.goals_claimed.has(int(gg.day)):
-				g = gg
-				break
 	var cur: int = mini(Game.goal_progress(String(g.kind)), int(g.n))
-	_goal_label.text = "%s（第%d天）：%s　%d/%d" % [
+	_goal_label.text = "%s（第%d天）：%s　%d/%d　（Y 看全部）" % [
 		tag, int(g.day), String(g.name), cur, int(g.n)]
+	if goals_open:
+		_refresh_goals()
+
+
+## 目标清单面板：七日目标像成就一样排成一份常驻清单，随时能翻、过期也能补
+func _build_goals() -> void:
+	_goals_panel = PanelContainer.new()
+	_goals_panel.anchor_left = 0.5
+	_goals_panel.anchor_top = 0.5
+	_goals_panel.anchor_right = 0.5
+	_goals_panel.anchor_bottom = 0.5
+	_goals_panel.offset_left = -330.0
+	_goals_panel.offset_top = -192.0
+	_goals_panel.offset_right = 330.0
+	_goals_panel.offset_bottom = 192.0
+	_goals_panel.visible = false
+	var gsb := StyleBoxFlat.new()
+	gsb.bg_color = Color(0.07, 0.1, 0.07, 0.95)
+	gsb.border_color = Color(0.92, 0.8, 0.42, 0.8)
+	gsb.set_border_width_all(2)
+	gsb.set_corner_radius_all(10)
+	gsb.content_margin_left = 20.0
+	gsb.content_margin_right = 20.0
+	gsb.content_margin_top = 14.0
+	gsb.content_margin_bottom = 14.0
+	_goals_panel.add_theme_stylebox_override("panel", gsb)
+	$UI.add_child(_goals_panel)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 4)
+	_goals_panel.add_child(vb)
+	var title := _mk_label("七日目标 · 新手路线", 20)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(title)
+	_goals_head = _mk_label("", 13)
+	_goals_head.add_theme_color_override("font_color", Color(1, 0.88, 0.4))
+	_goals_head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(_goals_head)
+	for g in Game.DAY_GOALS:
+		var l := _mk_label("", 14)
+		l.custom_minimum_size = Vector2(0, 24)  # 固定行高，避免中英混排时行距挤压
+		vb.add_child(l)
+		_goals_labels.append(l)
+	var note := _mk_label("目标不会过期：哪天想起来补做都算数，达成即自动发金币和种子", 12)
+	note.add_theme_color_override("font_color", Color(0.72, 0.8, 0.62))
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(note)
+	var close_l := _mk_label("按 Y / E / Esc 关闭", 12)
+	close_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(close_l)
+	# 手机上触控层会给面板让位，这里放一个实体关闭按钮兜底
+	var close_b := _mk_btn("关闭")
+	close_b.pressed.connect(func() -> void: _toggle_goals(false))
+	vb.add_child(close_b)
+
+
+func _toggle_goals(open: bool) -> void:
+	goals_open = open
+	_goals_panel.visible = open
+	if open:
+		_refresh_goals()
+
+
+## 逐条刷新：✓已达成 / ▶进行中 / ·未开始，附奖励说明
+func _refresh_goals() -> void:
+	if _goals_panel == null:
+		return
+	var done := 0
+	for i in Game.DAY_GOALS.size():
+		var g: Dictionary = Game.DAY_GOALS[i]
+		var d := int(g.day)
+		var got: bool = Game.goals_claimed.has(d)
+		if got:
+			done += 1
+		var cur: int = mini(Game.goal_progress(String(g.kind)), int(g.n))
+		var reward := "＋%d金 ＋%s种子x%d" % [int(g.gold),
+			String(Game.CROPS[String(g.seed)].name), int(g.seed_n)]
+		var text: String
+		var col: Color
+		if got:
+			text = "✓ 第%d天　%s　（%s）" % [d, String(g.name), reward]
+			col = Color(1, 0.85, 0.35)
+		elif cur > 0:
+			text = "▶ 第%d天　%s　%d/%d　（%s）" % [d, String(g.name), cur, int(g.n), reward]
+			col = Color(1, 0.98, 0.92)
+		else:
+			text = "· 第%d天　%s　0/%d　（%s）" % [d, String(g.name), int(g.n), reward]
+			col = Color(0.62, 0.6, 0.54)
+		_goals_labels[i].text = text
+		_goals_labels[i].add_theme_color_override("font_color", col)
+	_goals_head.text = "已完成 %d/%d　·　没做完的会一直留在这里" % [done, Game.DAY_GOALS.size()]
 
 
 ## 收集包面板：交齐作物/鱼/矿石/牧产，换金币与永久体力上限
@@ -3252,7 +3356,8 @@ func _build_help() -> void:
 	_help_section(col_r, "订单与养殖", [
 		"货摊旁任务板按 E 接订单：每天 3 张，交作物/鱼/材料得金币与好感",
 		"养鸡 800g/只（最多4）每天下蛋；奶牛 2500g、绵羊 2000g 住畜棚产奶产毛",
-		"七天阶段目标显示在左上「今日目标」，达成自动发金币与对应季节种子",
+		"七天阶段目标显示在左上（没做完的会一直保留），按 Y 看全部 7 条清单",
+		"目标不会过期：隔几天再补做也算，达成后自动发金币与对应季节种子",
 		"B 打开收集包：交作物/鱼/矿石/牧产换金币 + 永久体力上限",
 		"每天起床会弹「农场小报」：天气、当季作物、订单与节日提醒；Esc/空格关闭",
 	])
@@ -3367,16 +3472,13 @@ func _refresh_daily() -> void:
 		var cfg: Dictionary = FESTS[fk]
 		lines.append("今天是%s：%s %d 个达标，睡前奖励 %d 金币！" % [
 			cfg.name, cfg.unit, int(cfg.goal), int(cfg.reward)])
-	# 七日目标
-	if Game.day <= 7:
-		var g = null
+	# 七日目标：显示最早一条未完成的（过期也能补做，按 Y 看全部）
+	if Game.goals_claimed.size() < Game.DAY_GOALS.size():
 		for gd in Game.DAY_GOALS:
-			if int(gd.day) == Game.day:
-				g = gd
+			if not Game.goals_claimed.has(int(gd.day)):
+				lines.append("目标（第%d天·不会过期）：%s（进度 %d/%d，按 Y 看全部 7 条）" % [
+					int(gd.day), String(gd.name), Game.goal_progress(String(gd.kind)), int(gd.n)])
 				break
-		if g != null and not Game.goals_claimed.has(Game.day):
-			lines.append("今日目标：%s（进度 %d/%d）" % [
-				g.name, Game.goal_progress(g.kind), int(g.n)])
 	# 一句建议（按当前状态给不同提示，防劝退）
 	var tip := ""
 	if Game.stamina < Game.max_stamina * 0.3:
