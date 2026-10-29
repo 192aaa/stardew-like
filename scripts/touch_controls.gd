@@ -187,6 +187,13 @@ func _process(_d: float) -> void:
 # ---------- 摇杆：_input 层捕获，手指滑出感应区也不丢 ----------
 
 func _input(e: InputEvent) -> void:
+	# 兜底：自动模式下若检测误判成桌面（老 WebView 常见），只要真的收到触摸就打开触控层
+	if not _enabled and e is InputEventScreenTouch and e.pressed \
+			and String(Save.setting("touch_buttons", "auto")) == "auto":
+		_enabled = true
+		if not _blocked():
+			visible = true
+		queue_redraw()
 	if not _enabled or not visible:
 		return
 	if e is InputEventScreenTouch:
