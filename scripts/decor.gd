@@ -45,16 +45,25 @@ const STALL_RECT := Rect2(560, -450, 220, 120)
 const SHOP_POS := Vector2(670, -330)
 const POND_RECT := Rect2(560, -60, 240, 160)
 const LAMP_POS := Vector2(524, -374)
+## 轻扩图：世界 5200x2800，横向分三区——西侧森林采集区 / 中央农场核心区 / 东侧河岸钓鱼区
+const WORLD := Rect2(-2600, -1400, 5200, 2800)
+const FOREST_RECT := Rect2(-2600, -1400, 700, 2800)
+## 东侧河流水面（宽 280，东岸留一条窄滩 + 树墙），河岸可站人甩竿
+const RIVER_RECT := Rect2(2160, -1400, 280, 2800)
+## 跨河木栈道：把水面留出一段可行走的通行缺口（以栈道为桥）
+const DOCK_RECT := Rect2(2080, -640, 240, 140)
 ## 扩展区兴趣点：水井 / 信箱 / 花田 / 原木树桩
 const WELL_POS := Vector2(-1300, -320)
 const MAILBOX_POS := Vector2(-590, -396)
 const GARDEN_RECT := Rect2(-1320, 560, 300, 200)
 const LOG_POS := Vector2(-1210, -470)
 const STUMP_POS := Vector2(-1420, -180)
-## 北部野莓丛（Gather 系统负责交互）
+## 北部野莓丛（Gather 系统负责交互）；后半段是森林区新增的莓丛
 const BUSH_SPOTS := [
 	Vector2(-560, -880), Vector2(-430, -945), Vector2(-295, -865),
 	Vector2(-150, -950), Vector2(-680, -985), Vector2(-30, -830),
+	Vector2(-2020, -560), Vector2(-2180, -200), Vector2(-2320, 340),
+	Vector2(-2060, 700), Vector2(-2400, 980), Vector2(-1990, -1080),
 ]
 ## 订单任务牌（货摊右侧）
 const BOARD_POS := Vector2(810, -330)
@@ -86,6 +95,9 @@ const EXTRA_LAMPS := [Vector2(-600, -376), Vector2(300, -300)]
 const MUSHROOM_POS := [
 	Vector2(-1090, 320), Vector2(-1180, 760), Vector2(1120, 480),
 	Vector2(1560, -820), Vector2(-1560, -620), Vector2(1340, 900),
+	# 森林区与河岸的蘑菇
+	Vector2(-2150, 120), Vector2(-2260, 620), Vector2(-2400, -700),
+	Vector2(2060, 940), Vector2(2410, -860),
 ]
 
 const TREES := [
@@ -100,6 +112,26 @@ const TREES := [
 	Vector2(120, 1140), Vector2(820, 1120), Vector2(1420, 1090),
 	Vector2(-1700, 60), Vector2(-1660, 720), Vector2(-1720, -660),
 	Vector2(1700, -240), Vector2(1680, 420),
+	# 西侧森林采集区：林间空地错落，供野莓与采集物散布
+	Vector2(-1985, -880), Vector2(-2100, -430), Vector2(-2245, -1040),
+	Vector2(-2405, -300), Vector2(-2330, 480), Vector2(-2450, 1050),
+	Vector2(-2065, 880), Vector2(-1960, 250), Vector2(-2200, 1240),
+	Vector2(-2435, 740), Vector2(-2135, 1320), Vector2(-2280, -820),
+	Vector2(-2050, -1180), Vector2(-2320, 1180), Vector2(-2480, -60),
+	Vector2(-2380, -1180), Vector2(-2120, 520), Vector2(-2250, 860),
+	Vector2(-2420, 120), Vector2(-2000, 1080), Vector2(-2185, -620),
+	# 森林中段补密：围绕小径形成“林中空地”
+	Vector2(-2500, -260), Vector2(-2520, -760), Vector2(-2460, -1000),
+	Vector2(-2360, -880), Vector2(-2300, -380), Vector2(-2250, -700),
+	Vector2(-2160, -260), Vector2(-2100, -680), Vector2(-2040, -300),
+	Vector2(-1995, -620), Vector2(-2350, 60), Vector2(-1900, -160),
+	# 森林边缘一排树（中间在小径处留口），让农场与森林有明显分界
+	Vector2(-1905, -1180), Vector2(-1895, -960), Vector2(-1915, -760),
+	Vector2(-1900, 520), Vector2(-1915, 760), Vector2(-1900, 980),
+	Vector2(-1910, 1200),
+	# 东侧河岸：东岸窄滩上的柳树与近岸树
+	Vector2(2480, -980), Vector2(2495, 200), Vector2(2470, 860),
+	Vector2(2060, -1180), Vector2(2020, 1180),
 ]
 
 ## 石板小路：门口 → 农田 / 商店 / 水井 / 池塘
@@ -108,6 +140,10 @@ const PATHS := [
 	[Vector2(-636, -388), Vector2(-160, -362), Vector2(420, -348), Vector2(636, -322)],
 	[Vector2(-684, -402), Vector2(-1000, -386), Vector2(-1252, -348)],
 	[Vector2(-390, -230), Vector2(-80, -150), Vector2(300, -90), Vector2(498, -20)],
+	# 西侧进森林的小径
+	[Vector2(-1252, -348), Vector2(-1560, -400), Vector2(-1860, -470), Vector2(-2140, -560)],
+	# 东侧通往河岸栈道的小径
+	[Vector2(636, -322), Vector2(1300, -400), Vector2(1800, -500), Vector2(2140, -588)],
 ]
 
 const FLOWER_POS := [
@@ -256,19 +292,29 @@ func _ready() -> void:
 	_add_blocker_rect(Rect2(GARDEN_RECT.position.x, GARDEN_RECT.end.y - 8, GARDEN_RECT.size.x, 6))
 	_add_blocker_rect(Rect2(GARDEN_RECT.position.x, GARDEN_RECT.position.y, 6, GARDEN_RECT.size.y))
 	_add_blocker_rect(Rect2(GARDEN_RECT.end.x - 6, GARDEN_RECT.position.y, 6, GARDEN_RECT.size.y))
-	# 地图边界（草地 3800x2600，树墙内侧留出通行缓冲）
-	_add_blocker_rect(Rect2(-1960, -1300, 3920, 72))
-	_add_blocker_rect(Rect2(-1960, 1228, 3920, 72))
-	_add_blocker_rect(Rect2(-1900, -1300, 72, 2600))
-	_add_blocker_rect(Rect2(1828, -1300, 72, 2600))
+	# 河道水体：以木栈道为桥，栈道外侧的缺口用一段水面挡住，不让玩家“水上漂”
+	_add_blocker_rect(Rect2(RIVER_RECT.position.x, RIVER_RECT.position.y,
+			RIVER_RECT.size.x, DOCK_RECT.position.y - RIVER_RECT.position.y))
+	_add_blocker_rect(Rect2(RIVER_RECT.position.x, DOCK_RECT.end.y,
+			RIVER_RECT.size.x, RIVER_RECT.end.y - DOCK_RECT.end.y))
+	_add_blocker_rect(Rect2(DOCK_RECT.end.x, DOCK_RECT.position.y,
+			RIVER_RECT.end.x - DOCK_RECT.end.x, DOCK_RECT.size.y))
+	# 地图边界（草地 5200x2800，树墙内侧留出通行缓冲）
+	_add_blocker_rect(Rect2(-2576, -1400, 5152, 72))
+	_add_blocker_rect(Rect2(-2576, 1328, 5152, 72))
+	_add_blocker_rect(Rect2(-2600, -1400, 72, 2800))
+	_add_blocker_rect(Rect2(2528, -1400, 72, 2800))
 
 
 func _process(delta: float) -> void:
 	_wt += delta
-	# 水面波光动画
+	# 水面波光动画（池塘与东侧河流共用一套水帧）
 	var pond := get_node_or_null("../Pond")
 	if pond:
 		pond.texture = WATER_FRAMES[int(_wt / 0.45) % 4]
+	var river := get_node_or_null("../River")
+	if river:
+		river.texture = WATER_FRAMES[int(_wt / 0.45) % 4]
 	# 夜晚因子（从环境色调亮度推算）→ 灯光与萤火虫
 	var lum: float = get_node("../CanvasModulate").color.get_luminance()
 	var night := clampf((0.75 - lum) / 0.4, 0.0, 1.0)
@@ -304,8 +350,8 @@ func _process(delta: float) -> void:
 	for i in _clouds.size():
 		var c := _clouds[i]
 		c.position.x += delta * (9.0 + i * 2.5)
-		if c.position.x > 2150.0:
-			c.position.x = -2150.0
+		if c.position.x > 2550.0:
+			c.position.x = -2550.0
 
 
 ## 节日开关：节日当天在货摊前挂出彩旗
@@ -382,8 +428,8 @@ func _scatter_detail() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 99
 	var placed := 0
-	while placed < 46:
-		var p := Vector2(rng.randf_range(-1780, 1780), rng.randf_range(-1180, 1180))
+	while placed < 78:
+		var p := Vector2(rng.randf_range(-2500, 2500), rng.randf_range(-1250, 1250))
 		var blocked := false
 		for z in FARM.ZONES:
 			if z.grow(8).has_point(p):
@@ -397,6 +443,8 @@ func _scatter_detail() -> void:
 				or p.distance_to(COOP_POS) < 70:
 			blocked = true
 		if MINE_ZONE.grow(14).has_point(p):
+			blocked = true
+		if RIVER_RECT.grow(26.0).has_point(p) or DOCK_RECT.grow(10.0).has_point(p):
 			blocked = true
 		if FARM.GH_RECT.grow(12).has_point(p):
 			blocked = true
@@ -438,6 +486,9 @@ func _setup_ambience() -> void:
 		add_child(b)
 		_butterflies.append(b)
 	for i in range(0, TREES.size(), 2):
+		# 只给农场核心区的树加落叶发射器：森林区树多，全加会白白拉低帧率
+		if absf(TREES[i].x) > 1780.0:
+			continue
 		_add_leaf_rain(TREES[i] + Vector2(0, -30))
 	# 四季飘落物：春花瓣（粉色）/ 冬雪（浅蓝白，避免雪地白上看不见），秋叶由树冠落叶承担
 	_petals = _make_fall_particles(TEX_LEAF, Color(1.0, 0.87, 0.94), 200, 9.0, 16.0, 1.2, 2.0)
@@ -460,7 +511,7 @@ func _make_fall_particles(tex: Texture2D, col: Color, amount: int, life: float,
 	p.lifetime = life
 	p.preprocess = life
 	p.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
-	p.emission_rect_extents = Vector2(1860, 1260)
+	p.emission_rect_extents = Vector2(2560, 1360)
 	p.direction = Vector2(0.12, 1)
 	p.spread = 15.0
 	p.gravity = Vector2(0, fall)
@@ -584,7 +635,45 @@ func _add_blocker_circle(pos: Vector2, radius: float) -> void:
 	add_child(body)
 
 
+## 池塘与东侧河都算水域；grow 为容差（河岸放宽一点，站在岸边也能甩竿）
+func near_water(p: Vector2, grow: float) -> bool:
+	return POND_RECT.grow(grow).has_point(p) or RIVER_RECT.grow(grow + 50.0).has_point(p)
+
+
+## 取离玩家最近的水面矩形：浮标落点用它夹取
+func water_rect_near(p: Vector2) -> Rect2:
+	if RIVER_RECT.grow(140.0).has_point(p):
+		return RIVER_RECT
+	return POND_RECT
+
+
+## 河岸沙土、木栈道与芦苇（水面本体由 main.tscn 的 River 节点绘制）
+func _draw_river() -> void:
+	var r := RIVER_RECT
+	draw_rect(Rect2(r.position.x - 30.0, r.position.y, 30.0, r.size.y), Color(0.52, 0.46, 0.31, 0.92))
+	draw_rect(Rect2(r.end.x, r.position.y, 26.0, r.size.y), Color(0.52, 0.46, 0.31, 0.92))
+	# 木栈道：木板竖纹 + 深色描边
+	draw_rect(DOCK_RECT, Color(0.47, 0.34, 0.22))
+	var x := DOCK_RECT.position.x + 8.0
+	while x < DOCK_RECT.end.x - 8.0:
+		draw_line(Vector2(x, DOCK_RECT.position.y + 4.0), Vector2(x, DOCK_RECT.end.y - 4.0),
+				Color(0.63, 0.47, 0.3, 0.85), 2.0)
+		x += 20.0
+	draw_rect(DOCK_RECT, Color(0.22, 0.16, 0.1, 0.95), false, 2.0)
+	# 近岸芦苇
+	var yy := int(r.position.y) + 60
+	while yy < int(r.end.y) - 40:
+		draw_line(Vector2(r.position.x - 6.0, yy), Vector2(r.position.x - 12.0, yy - 26.0),
+				Color(0.32, 0.48, 0.22, 0.85), 2.0)
+		draw_line(Vector2(r.position.x - 6.0, yy), Vector2(r.position.x + 2.0, yy - 20.0),
+				Color(0.32, 0.48, 0.22, 0.7), 2.0)
+		yy += 120
+
+
 func _draw() -> void:
+	# 森林地面压深一档，与农场核心区在视觉上拉开层次
+	draw_rect(FOREST_RECT, Color(0.12, 0.2, 0.1, 0.2))
+	_draw_river()
 	_draw_forest_wall()
 	for z in FARM.ZONES:
 		_draw_fence(z)
@@ -656,13 +745,13 @@ func _draw_forest_wall() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4242
 	var i := 0
-	for x in range(-1876, 1877, 52):
-		_wall_tree(Vector2(x + rng.randf_range(-9, 9), -1248 + rng.randf_range(-7, 7)), i)
-		_wall_tree(Vector2(x + rng.randf_range(-9, 9), 1248 + rng.randf_range(-7, 7)), i + 1)
+	for x in range(-2544, 2545, 52):
+		_wall_tree(Vector2(x + rng.randf_range(-9, 9), -1348 + rng.randf_range(-7, 7)), i)
+		_wall_tree(Vector2(x + rng.randf_range(-9, 9), 1348 + rng.randf_range(-7, 7)), i + 1)
 		i += 2
-	for y in range(-1244, 1245, 52):
-		_wall_tree(Vector2(-1852 + rng.randf_range(-7, 7), y + rng.randf_range(-9, 9)), i)
-		_wall_tree(Vector2(1852 + rng.randf_range(-7, 7), y + rng.randf_range(-9, 9)), i + 1)
+	for y in range(-1344, 1345, 52):
+		_wall_tree(Vector2(-2560 + rng.randf_range(-7, 7), y + rng.randf_range(-9, 9)), i)
+		_wall_tree(Vector2(2560 + rng.randf_range(-7, 7), y + rng.randf_range(-9, 9)), i + 1)
 		i += 2
 
 

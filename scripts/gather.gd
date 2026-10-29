@@ -8,7 +8,7 @@ const TEX_BUSH_PLAIN := preload("res://assets/bush_plain.png")
 const FARM := preload("res://scripts/farm.gd")
 const DECOR := preload("res://scripts/decor.gd")
 
-const MAX_OBJECTS := 14
+const MAX_OBJECTS := 18
 
 ## 对象：{kind: "rock"/"branch", pos, hp, spr}
 var _objs: Array = []
@@ -82,7 +82,7 @@ func _spawn(n: int) -> void:
 
 func _find_spot() -> Vector2:
 	for attempt in 24:
-		var p := Vector2(randf_range(-1700.0, 1700.0), randf_range(-1120.0, 1120.0))
+		var p := Vector2(randf_range(-2450.0, 2450.0), randf_range(-1200.0, 1200.0))
 		if _free(p):
 			return p
 	return Vector2.INF
@@ -105,6 +105,8 @@ func _free(p: Vector2) -> bool:
 	if p.distance_to(DECOR.BOARD_POS) < 60.0 or p.distance_to(DECOR.COOP_POS) < 70.0:
 		return false
 	if DECOR.MINE_ZONE.grow(12).has_point(p):
+		return false
+	if DECOR.RIVER_RECT.grow(40.0).has_point(p) or DECOR.DOCK_RECT.grow(14.0).has_point(p):
 		return false
 	if DECOR.GARDEN_RECT.grow(28).has_point(p):
 		return false

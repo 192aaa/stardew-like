@@ -2,8 +2,8 @@ extends Control
 ## 右上角小地图：把世界坐标等比缩到面板里，绘制农田/建筑/矿洞/村民/宠物与两名玩家
 ## 由 main.gd 每帧刷新；按 Tab 在「小/大」两档之间切换
 
-## 世界范围（与相机 limit 一致）
-const WORLD := Rect2(-1900, -1300, 3800, 2600)
+## 世界范围（与 decor.WORLD 一致，轻扩图后为 5200x2800）
+const WORLD := Rect2(-2600, -1400, 5200, 2800)
 const SIZE_S := Vector2(190, 130)
 const SIZE_L := Vector2(380, 260)
 
@@ -17,6 +17,7 @@ const C_WATER := Color(0.28, 0.52, 0.85)
 const C_WOOD := Color(0.78, 0.58, 0.34)
 const C_BARN := Color(0.75, 0.35, 0.3)
 const C_MINE := Color(0.3, 0.28, 0.34)
+const C_FOREST := Color(0.16, 0.3, 0.16)
 const C_GARDEN := Color(0.58, 0.78, 0.42)
 const C_SOIL := Color(0.68, 0.48, 0.3)
 const C_CROP := Color(0.55, 0.9, 0.42)
@@ -94,6 +95,9 @@ func _draw() -> void:
 	var bg: Color = C_GROUND.get(gid, C_GROUND.spring)
 	# 底板 + 边框
 	draw_rect(Rect2(Vector2.ZERO, size), bg)
+	# 三区底色：西侧森林 / 东侧河流，一眼看清能去哪
+	draw_rect(_r(dec.FOREST_RECT), C_FOREST)
+	draw_rect(_r(dec.RIVER_RECT), C_WATER)
 	# 地形要素
 	draw_rect(_r(dec.POND_RECT), C_WATER)
 	draw_rect(_r(dec.GARDEN_RECT), C_GARDEN)

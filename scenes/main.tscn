@@ -24,7 +24,7 @@ texture_repeat = 2
 position = Vector2(0, 0)
 texture = ExtResource("5")
 region_enabled = true
-region_rect = Rect2(0, 0, 3800, 2600)
+region_rect = Rect2(0, 0, 5200, 2800)
 
 [node name="Patch1" type="Sprite2D" parent="."]
 position = Vector2(-300, -235)
@@ -48,6 +48,13 @@ position = Vector2(680, 20)
 texture = ExtResource("7")
 region_enabled = true
 region_rect = Rect2(0, 0, 240, 160)
+
+[node name="River" type="Sprite2D" parent="."]
+texture_repeat = 2
+position = Vector2(2300, 0)
+texture = ExtResource("7")
+region_enabled = true
+region_rect = Rect2(0, 0, 280, 2800)
 
 [node name="CanvasModulate" type="CanvasModulate" parent="."]
 

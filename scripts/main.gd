@@ -821,8 +821,8 @@ func _axe_action() -> void:
 func _fishing_action() -> void:
 	match fish_state:
 		0:
-			if not decor.POND_RECT.grow(44.0).has_point(player.position):
-				_toast("要靠近池塘才能甩竿")
+			if not decor.near_water(player.position, 44.0):
+				_toast("要靠近水边（池塘或东边河岸）才能甩竿")
 				return
 			if not Game.use_stamina(5.0):
 				_toast("体力不够了，回床上睡一觉吧")
@@ -860,7 +860,7 @@ func _fishing_action() -> void:
 
 
 func _cast() -> void:
-	var pr: Rect2 = decor.POND_RECT
+	var pr: Rect2 = decor.water_rect_near(player.position)
 	var aim: Vector2 = player.position + player.facing * 52.0
 	_bobber_base = Vector2(
 		clampf(aim.x, pr.position.x + 16.0, pr.end.x - 16.0),
@@ -3331,6 +3331,11 @@ func _build_help() -> void:
 		"洒水器浇四邻格；高级洒水器（铁锭造）浇 3x3；速效肥让作物立刻长一节",
 		"制作后移动到目标格子按空格放置，Esc 取消",
 	])
+	_help_section(col_l, "地图与三区（轻扩图）", [
+		"西侧森林采集区：野莓、蘑菇、倒木与矿岩更密集，前期攒材料就去这儿",
+		"东侧河岸：整条河都能甩竿，沿石板小径走到木栈道上钓鱼最稳",
+		"全图 5200x2800；Tab 放大后小地图上深绿=森林、蓝色=河流，玩家白点带描边",
+	])
 	_help_section(col_l, "矿洞挖矿与熔炉（新增）", [
 		"东侧矿洞区每天刷新矿岩：8 斧镐敲击，可得铜矿/铁矿/宝石",
 		"C 造熔炉（石8木2）：放矿隔夜铸锭；金币+矿可升铜→铁→金锄壶（3x3/5x5/7x7）",
@@ -4090,8 +4095,10 @@ func _update_hint() -> void:
 		txt = "矿洞区：8 斧镐敲矿岩，可得铜矿/铁矿/宝石"
 	elif gather.near_bush(player.position):
 		txt = "野莓熟了：按 E 采摘，第二天会再结果"
-	elif decor.POND_RECT.grow(30.0).has_point(player.position):
+	elif decor.near_water(player.position, 30.0):
 		txt = "水边适合钓鱼：7 甩竿 · 咬钩后再按空格"
+	elif decor.FOREST_RECT.has_point(player.position):
+		txt = "西边森林：野莓按 E 采摘，草丛里有蘑菇与倒木可捡"
 	else:
 		txt = "点物品栏换工具 · 「用」使用 · 「互动」E · 「菜单」里制作/存档" if touch \
 				else "1-0 切换工具 · 空格/左键 使用 · C 制作 · E 互动 · H 帮助"
