@@ -1,4 +1,4 @@
-[gd_scene load_steps=15 format=3]
+[gd_scene load_steps=17 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/player.tscn" id="1"]
 [ext_resource type="Script" path="res://scripts/main.gd" id="2"]
@@ -12,14 +12,23 @@
 [ext_resource type="Texture2D" path="res://assets/patch4.png" id="11"]
 [ext_resource type="Texture2D" path="res://assets/vignette.png" id="12"]
 [ext_resource type="Script" path="res://scripts/gather.gd" id="13"]
+[ext_resource type="Shader" path="res://shaders/sunlight.gdshader" id="14"]
 
 [sub_resource type="SystemFont" id="font_cjk"]
 font_names = PackedStringArray("Microsoft YaHei", "SimHei", "SimSun")
+
+[sub_resource type="ShaderMaterial" id="mat_sunlight"]
+render_priority = 0
+shader = ExtResource("14")
+shader_parameter/warm = Color(1, 0.87, 0.63, 1)
+shader_parameter/cool = Color(0.46, 0.55, 0.82, 1)
+shader_parameter/strength = 0.2
 
 [node name="Main" type="Node2D"]
 script = ExtResource("2")
 
 [node name="Ground" type="Sprite2D" parent="."]
+z_index = -3000
 texture_repeat = 2
 position = Vector2(0, 0)
 texture = ExtResource("5")
@@ -27,22 +36,27 @@ region_enabled = true
 region_rect = Rect2(0, 0, 5200, 2800)
 
 [node name="Patch1" type="Sprite2D" parent="."]
+z_index = -2995
 position = Vector2(-300, -235)
 texture = ExtResource("8")
 
 [node name="Patch2" type="Sprite2D" parent="."]
+z_index = -2995
 position = Vector2(385, -190)
 texture = ExtResource("9")
 
 [node name="Patch3" type="Sprite2D" parent="."]
+z_index = -2995
 position = Vector2(-410, 320)
 texture = ExtResource("10")
 
 [node name="Patch4" type="Sprite2D" parent="."]
+z_index = -2995
 position = Vector2(305, 300)
 texture = ExtResource("11")
 
 [node name="Pond" type="Sprite2D" parent="."]
+z_index = -2990
 texture_repeat = 2
 position = Vector2(680, 20)
 texture = ExtResource("7")
@@ -50,6 +64,7 @@ region_enabled = true
 region_rect = Rect2(0, 0, 240, 160)
 
 [node name="River" type="Sprite2D" parent="."]
+z_index = -2990
 texture_repeat = 2
 position = Vector2(2300, 0)
 texture = ExtResource("7")
@@ -59,17 +74,30 @@ region_rect = Rect2(0, 0, 280, 2800)
 [node name="CanvasModulate" type="CanvasModulate" parent="."]
 
 [node name="Decor" type="Node2D" parent="."]
+z_index = -2900
 script = ExtResource("4")
 
-[node name="Gather" type="Node2D" parent="."]
-script = ExtResource("13")
-
 [node name="Farm" type="Node2D" parent="."]
+z_index = -2890
 script = ExtResource("3")
+
+[node name="Gather" type="Node2D" parent="."]
+z_index = -2880
+script = ExtResource("13")
 
 [node name="Player" parent="." instance=ExtResource("1")]
 
 [node name="UI" type="CanvasLayer" parent="."]
+
+[node name="Sunlight" type="ColorRect" parent="UI"]
+material = SubResource("mat_sunlight")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(1, 1, 1, 1)
 
 [node name="Vignette" type="TextureRect" parent="UI"]
 modulate = Color(1, 1, 1, 0.85)

@@ -184,8 +184,35 @@ const GIFT_MILESTONES := [20, 40, 60, 80]
 const GIFT_REWARDS := {"gold": 100, "seeds": 3, "gem": 1, "gold2": 300}
 const GIFT_DAILY := 2  # 每人每天最多收 2 份礼
 
+## 可选主角：4 位，各有 1 个被动特长 + 1 个主动技能（Q 键释放，耗体力、有冷却）
+## kind 决定被动/主动走哪套逻辑：stamina 体力 / sell 卖价 / mine 矿石 / fish 钓鱼
+const HEROES := [
+	{"name": "阿蓝", "title": "农夫", "tex": "res://assets/player_lan.png",
+		"color": Color(0.36, 0.52, 0.86),
+		"passive": "stamina", "passive_name": "勤劳",
+		"passive_text": "体力上限 +20",
+		"skill_name": "疾行", "skill_text": "4 秒内移速 +60%", "cd": 20.0, "cost": 8.0},
+	{"name": "阿茉", "title": "商人", "tex": "res://assets/player_mo.png",
+		"color": Color(0.86, 0.40, 0.44),
+		"passive": "sell", "passive_name": "精明",
+		"passive_text": "卖价 +15%",
+		"skill_name": "吆喝", "skill_text": "30 秒内卖价再 +50%", "cd": 60.0, "cost": 5.0},
+	{"name": "阿铁", "title": "矿工", "tex": "res://assets/player_tie.png",
+		"color": Color(0.86, 0.60, 0.28),
+		"passive": "mine", "passive_name": "矿工直觉",
+		"passive_text": "敲碎矿石额外 +1",
+		"skill_name": "爆破", "skill_text": "一次震碎身边所有矿石", "cd": 45.0, "cost": 15.0},
+	{"name": "阿溪", "title": "渔夫", "tex": "res://assets/player_xi.png",
+		"color": Color(0.30, 0.62, 0.58),
+		"passive": "fish", "passive_name": "稳步",
+		"passive_text": "钓鱼绿区 +20%，失误上限 +1",
+		"skill_name": "撒网", "skill_text": "立刻钓上一条鱼", "cd": 60.0, "cost": 12.0},
+]
+
 var gold := 500
 var day := 1
+## 当前主角（HEROES 下标）：新游戏选角写入存档，旧档默认 0 = 阿蓝
+var hero_id := 0
 var seeds := {"parsnip": 5, "potato": 0, "straw": 0, "pumpkin": 0, "corn": 0, "blue": 0}
 var harvest := {"parsnip": 0, "potato": 0, "straw": 0, "pumpkin": 0, "corn": 0, "blue": 0}
 ## 背包：木材/石料/野莓/鱼/矿石/金属锭/奶毛/加工产品/料理
@@ -233,6 +260,25 @@ var rod_lv := 1        # 鱼竿等级（2 = 铜钓竿）
 ## 宠物：已领养的宠物（"cat"/"dog"）与心情（0-100）
 var pets: Array = []
 var pet_mood := {"cat": 0, "dog": 0}
+## 宠物窝（安放宠物的地方）：是否已建好 + 每只宠物现在是否待在窝里
+const PET_HOUSE_COST := 800
+var pet_house := false
+var pets_home := {"cat": false, "dog": false}
+
+## 可建造建筑：小屋（进去是仓库界面）/ 矿洞入口（进去是矿洞界面）
+## 每座建筑占农舍旁一个固定槽位，重复建造同种也会开新槽
+const BUILD_DEFS := {
+	"storehouse": {"name": "小屋仓库", "gold": 1200, "wood": 20,
+		"desc": "建好后按 E 进门：独立仓库界面，背包材料可存可取"},
+	"mine_entrance": {"name": "矿洞入口", "gold": 1500, "wood": 30,
+		"desc": "建好后按 E 进洞：独立矿洞界面，一层层往下挖矿"},
+}
+## 仓库容量：最多存 8 种物品（每种数量不限）
+const STORAGE_CAP := 8
+## 已建建筑：每项 {kind, slot}
+var buildings: Array = []
+## 仓库：物品id -> 数量（进存档）
+var storage := {}
 
 ## 统计与成就
 var total_harvest := 0
@@ -489,6 +535,10 @@ func reset_state() -> void:
 	rod_lv = 1
 	pets = []
 	pet_mood = {"cat": 0, "dog": 0}
+	pet_house = false
+	pets_home = {"cat": false, "dog": false}
+	buildings = []
+	storage = {}
 	total_harvest = 0
 	orders_done = 0
 	achievements = {}
@@ -503,3 +553,23 @@ func reset_state() -> void:
 	greenhouse_built = false
 	bundles_done = []
 	state_changed.emit()
+
+
+## 当前主角数据表（越界保护，存档损坏时退回阿蓝）
+func hero() -> Dictionary:
+	return HEROES[clampi(hero_id, 0, HEROES.size() - 1)]
+
+
+## 当前主角的被动类型：stamina / sell / mine / fish
+func hero_kind() -> String:
+	return String(hero().passive)
+
+
+## 卖价倍率（阿茉被动 +15%）；临时吆喝加价由 main 另外叠乘
+func sell_mult() -> float:
+	return 1.15 if hero_kind() == "sell" else 1.0
+
+
+## 敲碎一块矿石额外多给的矿料（阿铁被动）
+func ore_bonus() -> int:
+	return 1 if hero_kind() == "mine" else 0

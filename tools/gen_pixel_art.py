@@ -134,111 +134,208 @@ def tile_water(frame=0):
     return img
 
 
-# ---------------- 玩家精灵表 ----------------
-
-PAL_P = {
-    "o": (44, 36, 30),    # 描边
-    "h": (130, 90, 56),   # 头发亮
-    "H": (96, 64, 40),    # 头发暗
-    "s": (248, 208, 160), # 皮肤
-    "e": (48, 40, 34),    # 眼睛
-    "m": (206, 122, 100), # 嘴
-    "w": (240, 236, 224), # 衬衫领
-    "b": (74, 114, 186),  # 蓝夹克
-    "B": (56, 88, 150),   # 夹克暗
-    "p": (98, 74, 58),    # 裤子
-    "P": (78, 58, 46),    # 裤子暗
-    "k": (66, 48, 38),    # 靴子
-}
+# ---------------- 主角精灵表（16x32 原生细节版，4 位可选主角） ----------------
+# 骨架共用，靠 发色/服装配色/帽子/长发 区分；每格 16x32，S=2 后 32x64 px，脚底在格底
 
 BODY_DOWN = [
     "................",
-    "....oooooooo....",
+    "................",
+    "......oooo......",
+    "....ohhhhhho....",
     "...ohhhhhhhho...",
-    "..ohhhhhhhhhho..",
-    "..ohHhhhhhhHho..",
-    "..ohhhhhhhhhho..",
-    "..ohhsssssshho..",
+    "...ohHhhhhHho...",
+    "..ohhsssssssho..",
+    "..oHssssssssHo..",
     "..ohsessssesho..",
     "..ohssssssssho..",
     "..ohsssmmsssho..",
     "...ohssssssho...",
+    ".....osssso.....",
     "....owwwwwwo....",
     "..obbbbbbbbbbo..",
+    "..ocbbbbbbbbbo..",
     "..obbbbbbbbbbo..",
     "..obbbbbbbbbbo..",
+    "..obbbbbbBBbbo..",
     "..osbbbbbbbbso..",
+    "..osbbbbbbbbso..",
+    "..obbbbbbbbbbo..",
     "..oBBBBBBBBBBo..",
+    "...obbbbbbbbo...",
     "...oppppppppo...",
     "...oPpppppppo...",
     "...opppoopppo...",
-    "...okkkookkko...",
-    "....oooooooo....",
+    "...opppoopppo...",
+    "...oPpppopppo...",
+    "...okkkkkkkko...",
+    "...oKKKKKKKKo...",
+    "................",
 ]
 BODY_UP = [
     "................",
-    "....oooooooo....",
+    "................",
+    "......oooo......",
+    "....ohhhhhho....",
     "...ohhhhhhhho...",
+    "...ohHhhhhHho...",
     "..ohhhhhhhhhho..",
     "..ohHhhhhhhHho..",
     "..ohhhhhhhhhho..",
     "..ohhhhhhhhhho..",
     "..ohhhhhhhhhho..",
-    "..ohhhhhhhhhho..",
-    "..ohhhhhhhhhho..",
     "...ohhhhhhhho...",
-    "....oBBBBBBo....",
-    "..obbbbbbbbbbo..",
-    "..obbbbbbbbbbo..",
-    "..obbbbbbbbbbo..",
-    "..osbbbbbbbbso..",
-    "..oBBBBBBBBBBo..",
-    "...oppppppppo...",
-    "...oPpppppppo...",
-    "...opppoopppo...",
-    "...okkkookkko...",
-    "....oooooooo....",
-]
-BODY_SIDE = [
-    "................",
-    "....oooooooo....",
-    "...ohhhhhhhho...",
-    "..ohhhhhhhhhho..",
-    "..ohhhhhhhhhho..",
-    "..ohhhhhhhhHho..",
-    "..ohhhhhhsssso..",
-    "..ohhhhhhsesso..",
-    "..ohhhhhhsssso..",
-    "..ohhhhhhssmso..",
-    "...ohhsssssso...",
+    ".....osssso.....",
     "....owwwwwwo....",
     "..obbbbbbbbbbo..",
     "..obbbbbbbbbbo..",
+    "..ocbbbbbbbbbo..",
     "..obbbbbbbbbbo..",
-    "..obbbbbbbbbso..",
+    "..obbbbbbBBbbo..",
+    "..osbbbbbbbbso..",
+    "..osbbbbbbbbso..",
+    "..obbbbbbbbbbo..",
     "..oBBBBBBBBBBo..",
+    "...obbbbbbbbo...",
+    "...oppppppppo...",
+    "...oPpppppppo...",
+    "...opppoopppo...",
+    "...opppoopppo...",
+    "...oPpppopppo...",
+    "...okkkkkkkko...",
+    "...oKKKKKKKKo...",
+    "................",
+]
+BODY_SIDE = [
+    "................",
+    "................",
+    "......oooo......",
+    "....ohhhhhho....",
+    "...ohhhhhhhho...",
+    "...ohHhhhhHho...",
+    "..ohhhhhhhhhho..",
+    "..ohhhhhhhhhHo..",
+    "..ohhhhsssssso..",
+    "..ohhhhsesssso..",
+    "..ohhhhsssssso..",
+    "..ohhhhsssmsso..",
+    "...ohhsssssho...",
+    ".....osssso.....",
+    "....owwwwwwo....",
+    "..obbbbbbbbbbo..",
+    "..ocbbbbbbbbbo..",
+    "..obbbbbbbbbbo..",
+    "..obbbbbbBBbbo..",
+    "..obbbbbbbbbso..",
+    "..obbbbbbbbbso..",
+    "..obbbbbbbbbbo..",
+    "..oBBBBBBBBBBo..",
+    "...obbbbbbbbo...",
     "...oppppppppo...",
     "...oPpppppppo...",
     "...oppppppppo...",
+    "...opppoopppo...",
+    "...oPpppopppo...",
     "...okkkkkkkko...",
-    "....oooooooo....",
+    "...oKKKKKKKKo...",
+    "................",
 ]
 
+# 帽子覆盖行（y2..y5）：a 帽身 / A 帽檐；侧视图帽檐向右（朝前）伸出
+HAT_DOWN = [
+    (2, "......aaaa......"),
+    (3, "....oaaaaaao...."),
+    (4, "...oaaaaaaaao..."),
+    (5, ".oAAAAAAAAAAAAo."),
+]
+HAT_SIDE = [
+    (2, "......aaaa......"),
+    (3, "....oaaaaaao...."),
+    (4, "...oaaaaaaaao..."),
+    (5, "..oAAAAAAAAAAAAo"),
+]
+# 长发：两鬓垂到肩（下/上），侧面在脑后拖一束（贴在头侧，不留缝）
+LONG_DOWN = [(y, ".hh..........hh.") for y in range(7, 18)]
+LONG_UP = [(y, ".hh..........hh.") for y in range(7, 20)]
+LONG_SIDE = [(y, ".hh.............") for y in range(7, 18)]
+# 发绳（阿茉的红发带）
+TIE_DOWN = [(17, ".rr..........rr.")]
+TIE_UP = [(19, ".rr..........rr.")]
 
-def player_sheet():
-    frames = []  # 3 方向 x 3 帧（站/走A/走B）
-    for body, legbox in ((BODY_DOWN, (3, 19, 8, 22)), (BODY_UP, (3, 19, 8, 22)), (BODY_SIDE, (3, 18, 13, 22))):
-        base = grid(body, PAL_P)
-        walkA = shift_region(base, legbox, 1)
-        walkB = shift_region(base, (16 - legbox[2], legbox[1], 16 - legbox[0], legbox[3]), 1)
+
+def overlay(img, rows, pal):
+    """(y, 16 字符) 覆盖到图上（'.' 跳过），用于帽子 / 长发等分角色细节"""
+    px = img.load()
+    for y, row in rows:
+        assert len(row) == 16, "overlay 行宽错误: %s" % row
+        for x, ch in enumerate(row):
+            c = pal.get(ch)
+            if c:
+                px[x, y] = c if len(c) == 4 else c + (255,)
+    return img
+
+
+def hero_sheet(pal, over_down=None, over_up=None, over_side=None):
+    """4 列（站/走A/站/走B）x 3 行（下/上/侧），16x32 单元"""
+    frames = []
+    for body, over, legs in (
+            (BODY_DOWN, over_down, ((3, 24, 8, 31), (9, 24, 13, 31))),
+            (BODY_UP, over_up, ((3, 24, 8, 31), (9, 24, 13, 31))),
+            (BODY_SIDE, over_side, ((3, 24, 9, 31), (8, 24, 13, 31)))):
+        base = grid(body, pal)
+        if over:
+            overlay(base, over, pal)
+        walkA = shift_region(base, legs[0], 1)
+        walkB = shift_region(base, legs[1], 1)
         frames += [base, walkA, walkB]
-    # 表：4 列（站/走A/站/走B）x 3 行（下/上/侧）
-    sheet = Image.new("RGBA", (16 * 4, 22 * 3), (0, 0, 0, 0))
+    sheet = Image.new("RGBA", (16 * 4, 32 * 3), (0, 0, 0, 0))
     for d in range(3):
         st, wa, wb = frames[d * 3: d * 3 + 3]
         for c, fr in ((0, st), (1, wa), (3, wb)):
-            sheet.paste(fr, (c * 16, d * 22))
-    return upscale(outline_sheet(sheet, 16, 22))
+            sheet.paste(fr, (c * 16, d * 32))
+    return upscale(outline_sheet(sheet, 16, 32))
+
+
+SKIN = {"s": (250, 214, 168), "e": (46, 38, 32), "m": (206, 120, 98), "w": (240, 236, 224)}
+
+PAL_LAN = dict(SKIN, **{
+    "o": (42, 36, 30),
+    "h": (124, 86, 54), "H": (158, 114, 72),   # 棕发
+    "b": (74, 114, 186), "B": (56, 88, 150), "c": (104, 148, 216),  # 蓝夹克
+    "p": (96, 78, 62), "P": (76, 60, 48),
+    "k": (66, 48, 38), "K": (46, 34, 28),
+    "a": (86, 130, 202), "A": (58, 94, 162),   # 蓝布帽
+})
+PAL_MO = dict(SKIN, **{
+    "o": (42, 36, 30),
+    "h": (176, 78, 66), "H": (216, 118, 98),   # 红棕长发
+    "b": (198, 88, 96), "B": (150, 58, 66), "c": (228, 128, 128),  # 红裙
+    "p": (146, 84, 82), "P": (114, 62, 62),
+    "k": (86, 58, 46), "K": (62, 42, 34),
+    "r": (244, 152, 172),                      # 发带
+})
+PAL_TIE = dict(SKIN, **{
+    "o": (42, 36, 30),
+    "h": (74, 62, 56), "H": (104, 90, 80),     # 黑短发
+    "b": (206, 128, 56), "B": (160, 96, 40), "c": (236, 164, 90),  # 橙工装
+    "p": (82, 80, 92), "P": (64, 62, 72),
+    "k": (70, 52, 42), "K": (50, 38, 30),
+    "a": (232, 196, 78), "A": (186, 148, 42),  # 黄色安全帽
+})
+PAL_XI = dict(SKIN, **{
+    "o": (42, 36, 30),
+    "h": (228, 196, 116), "H": (252, 228, 160),  # 金发
+    "b": (66, 142, 136), "B": (44, 106, 104), "c": (104, 180, 172),  # 青绿雨衣
+    "p": (68, 74, 90), "P": (54, 58, 72),
+    "k": (204, 182, 92), "K": (158, 138, 64),    # 黄胶靴
+    "a": (216, 206, 178), "A": (150, 172, 170),  # 渔夫帽
+})
+
+HEROES = [
+    ("player_lan.png", PAL_LAN, HAT_DOWN, HAT_DOWN, HAT_SIDE),
+    ("player_mo.png", PAL_MO, LONG_DOWN + TIE_DOWN, LONG_UP + TIE_UP, LONG_SIDE),
+    ("player_tie.png", PAL_TIE, HAT_DOWN, HAT_DOWN, HAT_SIDE),
+    ("player_xi.png", PAL_XI, HAT_DOWN + LONG_DOWN, HAT_DOWN + LONG_UP, HAT_SIDE + LONG_SIDE),
+]
 
 
 def outline_sheet(img, fw, fh):
@@ -250,185 +347,29 @@ def outline_sheet(img, fw, fh):
     return out
 
 
-# ---------------- 村民精灵表 ----------------
+# ---------------- 村民精灵表（与主角同一套 16x32 骨架，靠配色/发型区分） ----------------
 
-def npc_sheet(pal, down, up, side):
-    """与玩家表同规格：4 列（站/走A/站/走B）x 3 行（下/上/侧），16x22 单元"""
-    frames = []
-    for body, legbox in ((down, (3, 19, 8, 22)), (up, (3, 19, 8, 22)), (side, (3, 18, 13, 22))):
-        base = grid(body, pal)
-        walkA = shift_region(base, legbox, 1)
-        walkB = shift_region(base, (16 - legbox[2], legbox[1], 16 - legbox[0], legbox[3]), 1)
-        frames += [base, walkA, walkB]
-    sheet = Image.new("RGBA", (16 * 4, 22 * 3), (0, 0, 0, 0))
-    for d in range(3):
-        st, wa, wb = frames[d * 3: d * 3 + 3]
-        for c, fr in ((0, st), (1, wa), (3, wb)):
-            sheet.paste(fr, (c * 16, d * 22))
-    return upscale(outline_sheet(sheet, 16, 22))
-
-
-PAL_ROSA = {
+PAL_ROSA = dict(SKIN, **{
     "o": (44, 36, 30),
-    "h": (158, 62, 58), "H": (120, 44, 44),   # 红棕长发
-    "s": (248, 208, 160), "e": (48, 40, 34), "m": (206, 122, 100),
-    "r": (198, 74, 88), "R": (156, 52, 66),   # 红裙
-    "k": (84, 54, 42),
-}
-ROSA_DOWN = [
-    "................",
-    "....oooooooo....",
-    "...ohhhhhhhho...",
-    "..ohhhhhhhhhho..",
-    "..ohHhhhhhhHho..",
-    "..ohhhhhhhhhho..",
-    "..ohhsssssshho..",
-    "..ohsessssesho..",
-    "..ohssssssssho..",
-    "..ohsssmmsssho..",
-    "..ohhsssssshho..",
-    "...ohhhhhhhho...",
-    "...orrrrrrrro...",
-    "..orrrrrrrrrro..",
-    "..osrrrrrrrrso..",
-    "..orrrrrrrrrro..",
-    "..oRRRRRRRRRRo..",
-    "...orrrrrrrro...",
-    "...oRRRRRRRRo...",
-    "...orrrrrrrro...",
-    "...okkkkkkkko...",
-    "....oooooooo....",
-]
-ROSA_UP = [
-    "................",
-    "....oooooooo....",
-    "...ohhhhhhhho...",
-    "..ohhhhhhhhhho..",
-    "..ohHhhhhhhHho..",
-    "..ohhhhhhhhhho..",
-    "..ohhhhhhhhhho..",
-    "..ohhhhhhhhhho..",
-    "..ohhhhhhhhhho..",
-    "..ohhhhhhhhhho..",
-    "..ohhsssssshho..",
-    "...ohhhhhhhho...",
-    "...orrrrrrrro...",
-    "..orrrrrrrrrro..",
-    "..osrrrrrrrrso..",
-    "..orrrrrrrrrro..",
-    "..oRRRRRRRRRRo..",
-    "...orrrrrrrro...",
-    "...oRRRRRRRRo...",
-    "...orrrrrrrro...",
-    "...okkkkkkkko...",
-    "....oooooooo....",
-]
-ROSA_SIDE = [
-    "................",
-    "....oooooooo....",
-    "...ohhhhhhhho...",
-    "..ohhhhhhhhhho..",
-    "..ohhhhhhhhhho..",
-    "..ohhhhhhhhHho..",
-    "..ohhhhhhsssso..",
-    "..ohhhhhhsesso..",
-    "..ohhhhhhsssso..",
-    "..ohhhhhhssmso..",
-    "...ohhsssssso...",
-    "...ohhhhhhhho...",
-    "...orrrrrrrro...",
-    "..orrrrrrrrrro..",
-    "..osrrrrrrrrso..",
-    "..orrrrrrrrrro..",
-    "..oRRRRRRRRRRo..",
-    "...orrrrrrrro...",
-    "...oRRRRRRRRo...",
-    "...orrrrrrrro...",
-    "...okkkkkkkko...",
-    "....oooooooo....",
-]
-
-PAL_BEN = {
+    "h": (166, 74, 60), "H": (206, 112, 92),   # 红棕长发
+    "b": (202, 82, 96), "B": (152, 54, 66), "c": (230, 122, 128),  # 红裙
+    "p": (128, 84, 78), "P": (100, 62, 58),
+    "k": (86, 58, 46), "K": (62, 42, 34),
+    "r": (244, 152, 172),
+})
+PAL_BEN = dict(SKIN, **{
     "o": (44, 36, 30),
-    "y": (214, 182, 92), "Y": (178, 148, 64),  # 草帽
-    "h": (182, 182, 172), "H": (142, 142, 132),  # 灰发
-    "s": (234, 188, 142), "e": (48, 40, 34), "m": (196, 116, 96),
-    "v": (96, 144, 72), "V": (72, 114, 54),    # 绿马甲
-    "w": (226, 220, 200),
+    "h": (182, 182, 172), "H": (212, 212, 204),  # 灰白头发
+    "b": (98, 140, 76), "B": (72, 110, 56), "c": (126, 168, 98),   # 绿马甲
     "p": (96, 76, 58), "P": (76, 58, 44),
-    "k": (66, 48, 38),
-}
-BEN_DOWN = [
-    "................",
-    "....oooooooo....",
-    "...oyyyyyyyyo...",
-    "..oyyYYYYYYyyo..",
-    "..oyyyyyyyyyyo..",
-    "...ohhhhhhhho...",
-    "..ohssssssshho..",
-    "..ohsessssesho..",
-    "..ohssssssssho..",
-    "..ohsssmmsssho..",
-    "...ohssssssho...",
-    "....ovvvvvvo....",
-    "..owvvvvvvvvwo..",
-    "..owvvvvvvvvwo..",
-    "..osvvvvvvvvso..",
-    "..owwwwwwwwwwo..",
-    "...oppppppppo...",
-    "...oPpppppppo...",
-    "...oppppppppo...",
-    "...oppo..oppo...",
-    "...okko..okko...",
-    "....oooooooo....",
-]
-BEN_UP = [
-    "................",
-    "....oooooooo....",
-    "...oyyyyyyyyo...",
-    "..oyyYYYYYYyyo..",
-    "..oyyyyyyyyyyo..",
-    "...oyyyyyyyyo...",
-    "..ohhhhhhhhhho..",
-    "..ohhhhhhhhhho..",
-    "..ohhhhhhhhhho..",
-    "..ohhhhhhhhhho..",
-    "...ohhhhhhhho...",
-    "....oVVVVVVo....",
-    "..owvvvvvvvvwo..",
-    "..owvvvvvvvvwo..",
-    "..osvvvvvvvvso..",
-    "..owwwwwwwwwwo..",
-    "...oppppppppo...",
-    "...oPpppppppo...",
-    "...oppppppppo...",
-    "...oppo..oppo...",
-    "...okko..okko...",
-    "....oooooooo....",
-]
-BEN_SIDE = [
-    "................",
-    "....oooooooo....",
-    "...oyyyyyyyyo...",
-    "..oyyYYYYYYyyo..",
-    "..oyyyyyyyyyyo..",
-    "..oyhhhhhhhho...",
-    "..ohhssssssho...",
-    "..ohhssesssho...",
-    "..ohhssssssho...",
-    "..ohhssmmssho...",
-    "...ohsssssho....",
-    "....ovvvvvvo....",
-    "...owvvvvvvwo...",
-    "...owvvvvvvwo...",
-    "...osvvvvvvso...",
-    "...owwwwwwwwo...",
-    "...oppppppppo...",
-    "...oPpppppppo...",
-    "...oppppppppo...",
-    "...oppppppppo...",
-    "...okkkkkkkko...",
-    "....oooooooo....",
+    "k": (66, 48, 38), "K": (46, 34, 28),
+    "a": (214, 182, 92), "A": (176, 146, 62),    # 草帽
+})
+
+# 罗莎：长发遮到肩；老本：草帽
+VILLAGER_ART = [
+    ("villager_rosa.png", PAL_ROSA, LONG_DOWN + TIE_DOWN, LONG_UP + TIE_UP, LONG_SIDE),
+    ("villager_ben.png", PAL_BEN, HAT_DOWN, HAT_DOWN, HAT_SIDE),
 ]
 
 
@@ -2399,9 +2340,254 @@ def bgm_night():
     _bgm_write("bgm_night.wav", [lead, low])
 
 
+# ---------------- 画质升级：原生分辨率地面与树木 ----------------
+# 这些贴图不再走 16px 放大，直接按最终尺寸逐像素绘制，细节密度接近原版星露谷。
+
+GRASS_HD = dict(
+    base=(96, 152, 76), dark=(74, 124, 58), light=(116, 174, 90), blade=(58, 104, 46),
+)
+
+
+def grass_hd(seed=1, dots=True):
+    """32x32 原生草地：四档绿 + 1px 草叶 + 三叶草/碎石/小花点缀"""
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (32, 32))
+    px = img.load()
+    base, dark, light, blade = GRASS_HD["base"], GRASS_HD["dark"], GRASS_HD["light"], GRASS_HD["blade"]
+    for y in range(32):
+        for x in range(32):
+            r = rng.random()
+            c = dark if r < 0.18 else (light if r < 0.34 else base)
+            px[x, y] = c + (255,)
+    # 1px 草叶：一竖一横，让草地有纤维感
+    for _ in range(12):
+        x, y = rng.randrange(32), rng.randrange(32)
+        px[x, y] = blade + (255,)
+        if rng.random() < 0.6:
+            px[(x + 1) % 32, y] = blade + (255,)
+        if rng.random() < 0.5:
+            px[x, (y - 1) % 32] = base + (255,)
+    # 三叶草与碎石
+    for _ in range(3):
+        x, y = rng.randrange(1, 31), rng.randrange(1, 31)
+        for dx, dy in ((0, 0), (-1, 1), (1, 1)):
+            px[x + dx, y + dy] = (86, 150, 66, 255)
+    for _ in range(2):
+        x, y = rng.randrange(2, 30), rng.randrange(2, 30)
+        px[x, y] = (128, 126, 112, 255)
+        px[x + 1, y] = (108, 106, 94, 255)
+    if dots:  # 稀疏小野花（每块最多一朵，避免平铺后满地白点）
+        for _ in range(1):
+            x, y = rng.randrange(1, 31), rng.randrange(1, 31)
+            col = (242, 242, 232, 255) if rng.random() < 0.5 else (240, 208, 116, 255)
+            px[x, y] = col
+            px[x, (y - 1) % 32] = (86, 138, 58, 255)
+    return img
+
+
+def snow_hd(seed=2):
+    rng = random.Random(seed)
+    img = Image.new("RGBA", (32, 32))
+    px = img.load()
+    base, dark, light, blade = (238, 244, 250), (216, 226, 238), (252, 254, 255), (196, 210, 226)
+    for y in range(32):
+        for x in range(32):
+            r = rng.random()
+            c = dark if r < 0.2 else (light if r < 0.4 else base)
+            px[x, y] = c + (255,)
+    for _ in range(10):
+        x, y = rng.randrange(32), rng.randrange(32)
+        px[x, y] = blade + (255,)
+        px[(x + 1) % 32, y] = light + (255,)
+    return img
+
+
+def tree_hd(kind=0, seed=4):
+    """64x96 原生大树：叶簇拼出的蓬松树冠 + 四档色 + 受光 + 深描边"""
+    rng = random.Random(seed)
+    w, h = 64, 96
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    px = img.load()
+    if kind == 0:      # 橡树
+        pal = ((34, 70, 38), (56, 110, 54), (92, 152, 74), (132, 186, 100))
+        out_col = (26, 52, 30, 255)
+    elif kind == 1:    # 白桦：浅树干 + 偏黄绿树冠
+        pal = ((52, 82, 44), (90, 132, 62), (132, 174, 86), (172, 204, 118))
+        out_col = (38, 62, 34, 255)
+    else:              # 枫树：秋日橙红
+        pal = ((104, 42, 30), (168, 78, 40), (214, 130, 52), (240, 182, 84))
+        out_col = (78, 32, 22, 255)
+    dark, mid, lite, hi = pal
+
+    # 树冠由三层叶簇拼成：上排小簇 → 中排最宽 → 下排略收，轮廓自然起皱
+    clumps = []
+    for cx, cy, r in ((32, 13, 10), (21, 15, 9), (43, 15, 9)):
+        clumps.append((cx, cy, r))
+    for cx, cy, r in ((13, 25, 10), (24, 27, 12), (35, 26, 12), (46, 28, 11), (55, 26, 9)):
+        clumps.append((cx, cy, r))
+    for cx, cy, r in ((11, 35, 9), (22, 37, 11), (33, 38, 11), (44, 36, 11), (54, 35, 9)):
+        clumps.append((cx, cy, r))
+    for cx, cy, r in ((16, 45, 8), (28, 46, 10), (40, 45, 10), (50, 44, 8)):
+        clumps.append((cx, cy, r))
+
+    def depth(x, y):
+        best = -1.0
+        for cx, cy, r in clumps:
+            d = r - ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+            if d > best:
+                best = d
+        return best
+
+    canopy_bottom = 0
+    for y in range(0, 56):
+        for x in range(w):
+            dm = depth(x, y)
+            if dm < 0:
+                continue
+            canopy_bottom = max(canopy_bottom, y)
+            if dm < 1.2:                       # 外轮廓内缘压深
+                c = dark
+            else:
+                lum = (32 - x) * 0.55 + (52 - y) * 1.05 + dm * 1.6
+                if lum > 40:
+                    c = hi
+                elif lum > 16:
+                    c = lite
+                elif lum > -6:
+                    c = mid
+                else:
+                    c = dark
+            px[x, y] = c + (255,)
+    # 叶簇纹理：成片 2x2 明暗块，模拟一团团叶子而不是噪点
+    for _ in range(40):
+        x, y = rng.randrange(6, 58), rng.randrange(6, canopy_bottom - 1)
+        if depth(x, y) < 2.0:
+            continue
+        cur = px[x, y][:3]
+        i = pal.index(cur) if cur in pal else 2
+        shift = -1 if rng.random() < 0.6 else 1
+        col = pal[max(0, min(3, i + shift))] + (255,)
+        for dx, dy in ((0, 0), (1, 0), (0, 1)):
+            if depth(x + dx, y + dy) >= 2.0:
+                px[x + dx, y + dy] = col
+    # 顶部受光的高光叶尖
+    for _ in range(18):
+        x, y = rng.randrange(8, 56), rng.randrange(6, 26)
+        if depth(x, y) > 2.5:
+            px[x, y] = hi + (255,)
+    # 树干：短粗，底部外扩成根，白桦换浅灰白树皮
+    bark = (124, 88, 54) if kind != 1 else (214, 210, 198)
+    bark_l = (94, 64, 38) if kind != 1 else (238, 236, 228)
+    bark_d = (68, 46, 28) if kind != 1 else (172, 168, 158)
+    top = canopy_bottom - 6
+    for y in range(top, 92):
+        flare = 6 if y >= 88 else (5 if y >= 84 else 4)
+        for x in range(32 - flare, 32 + flare):
+            c = bark
+            if x <= 32 - flare:
+                c = bark_l
+            if x >= 32 + flare - 1:
+                c = bark_d
+            if kind == 1 and (y % 7 < 2):      # 白桦树皮横纹
+                c = bark_d
+            px[x, y] = c + (255,)
+    for y in range(top + 1, 90, 5):
+        if kind != 1:
+            px[31, y] = bark_l + (255,)
+            px[33, y + 2] = bark_d + (255,)
+    return outline(img, out_col)
+
+
+def pine_hd(seed=5):
+    """64x96 原生松树：六层枝杆，层间留缝，受光面偏左"""
+    rng = random.Random(seed)
+    w, h = 64, 96
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    px = img.load()
+    dark, mid, lite = (32, 78, 46), (54, 110, 62), (80, 140, 76)
+    tiers = [(10, 6, 9), (18, 18, 12), (12, 28, 14), (22, 38, 15), (16, 48, 16), (26, 56, 16)]
+    for cx, cy, r in tiers:
+        for y in range(cy - r // 2, cy + r + 2):
+            if y >= h:
+                break
+            half = max(1, int((y - (cy - r // 2)) * 1.1) + 2)
+            for x in range(32 - half, 32 + half):
+                if 0 <= x < w:
+                    c = mid
+                    if y >= cy + r - 2:
+                        c = dark
+                    elif x < 32 - half // 2:
+                        c = lite
+                    if (y - cy) % 9 == 0:
+                        c = dark
+                    px[x, y] = c + (255,)
+    for _ in range(30):
+        x, y = rng.randrange(6, 58), rng.randrange(6, 70)
+        if px[x, y][3] > 0:
+            px[x, y] = (dark if rng.random() < 0.6 else lite) + (255,)
+    for y in range(66, 92):
+        for x in range(30, 35):
+            px[x, y] = ((92, 62, 38) if x == 30 else (116, 80, 48)) + (255,)
+    return outline(img, (26, 40, 28, 255))
+
+
+def grass_patch():
+    """32x32 透明底草簇贴花：撒在草地上打破重复感"""
+    rng = random.Random(9)
+    img = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+    px = img.load()
+    for _ in range(5):
+        cx, cy = rng.randrange(4, 28), rng.randrange(6, 30)
+        for dx in range(-3, 4):
+            hgt = 6 - abs(dx)
+            for k in range(hgt):
+                px[cx + dx, cy - k] = ((70, 124, 52, 255) if k == hgt - 1 else (96, 154, 72, 255))
+    for _ in range(4):
+        x, y = rng.randrange(1, 31), rng.randrange(1, 31)
+        px[x, y] = (140, 196, 108, 255)
+    return img
+
+
+def leaf_litter():
+    """32x32 秋日落叶贴花（暖橙棕）"""
+    rng = random.Random(12)
+    img = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+    px = img.load()
+    cols = [(176, 92, 44, 255), (206, 132, 52, 255), (150, 74, 38, 255), (226, 168, 84, 255)]
+    for _ in range(16):
+        x, y = rng.randrange(1, 30), rng.randrange(1, 30)
+        c = rng.choice(cols)
+        px[x, y] = c
+        if rng.random() < 0.7:
+            px[x + 1, y] = c
+    return img
+
+
+def hd_detail(img, seed=0, amp=5, rim=True):
+    """最终分辨率上的 1px 细节：轻噪声 + 上缘受光 + 下缘压暗，让平面色块有材质感"""
+    rng = random.Random(seed)
+    w, h = img.size
+    src = img.load()
+    orig = img.copy().load()
+    for y in range(h):
+        for x in range(w):
+            c = orig[x, y]
+            if c[3] == 0:
+                continue
+            d = rng.randint(-amp, amp)
+            r, g, b = c[0] + d, c[1] + d, c[2] + d
+            if rim:
+                if y > 0 and orig[x, y - 1][3] == 0:
+                    r, g, b = r + 12, g + 12, b + 10
+                elif y < h - 1 and orig[x, y + 1][3] == 0:
+                    r, g, b = r - 16, g - 16, b - 14
+            src[x, y] = (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)), c[3])
+    return img
+
+
 def main():
-    save(upscale(tile_grass(1, dots=True)), "grass.png")
-    save(upscale(grass_snow()), "grass_snow.png")
+    save(grass_hd(1, dots=True), "grass.png")
+    save(snow_hd(), "grass_snow.png")
     for f in range(4):
         save(upscale(tile_water(f)), "water%d.png" % f)
     save(pond_edge(), "pond_edge.png")
@@ -2410,12 +2596,17 @@ def main():
         save(render_patch(w // 2, h // 2, i, SNOW_PATCH), "patch_snow%d.png" % i)
     save(upscale(tile_soil(False)), "soil.png")
     save(upscale(tile_soil(True)), "soil_wet.png")
-    save(player_sheet(), "player.png")
-    save(crops_atlas(), "crops.png")
-    save(tree(), "tree.png")
-    save(pine(), "tree2.png")
-    save(house(), "house.png")
-    save(stall(), "stall.png")
+    for name, pal, hd, hu, hs in HEROES:
+        save(hero_sheet(pal, hd, hu, hs), name)
+    save(hd_detail(crops_atlas(), 21, 4), "crops.png")
+    save(tree_hd(0), "tree.png")
+    save(pine_hd(), "tree2.png")
+    save(tree_hd(1, 6), "tree3.png")
+    save(tree_hd(2, 7), "tree4.png")
+    save(grass_patch(), "grass_patch.png")
+    save(leaf_litter(), "leaf_litter.png")
+    save(hd_detail(house(), 22, 5), "house.png")
+    save(hd_detail(stall(), 23, 5), "stall.png")
     save(fence_post(), "fence_post.png")
     save(fence_rail(), "fence_rail.png")
     save(flowers_atlas(), "flowers.png")
@@ -2435,21 +2626,21 @@ def main():
     save(fish_icon(), "fish.png")
     save(fish_gold(), "fish_gold.png")
     save(bobber(), "bobber.png")
-    save(well(), "well.png")
-    save(mailbox(), "mailbox.png")
-    save(bush(True), "bush_berry.png")
-    save(bush(False), "bush_plain.png")
-    save(log(), "log.png")
-    save(stump(), "stump.png")
-    save(mushroom(), "mushroom.png")
+    save(hd_detail(well(), 24, 4), "well.png")
+    save(hd_detail(mailbox(), 25, 4), "mailbox.png")
+    save(hd_detail(bush(True), 26, 4), "bush_berry.png")
+    save(hd_detail(bush(False), 27, 4), "bush_plain.png")
+    save(hd_detail(log(), 28, 4), "log.png")
+    save(hd_detail(stump(), 29, 4), "stump.png")
+    save(hd_detail(mushroom(), 30, 4), "mushroom.png")
     save(butterfly(), "butterfly.png")
     save(cloud_shadow(), "cloud_shadow.png")
     save(leaf(), "leaf.png")
     save(dust(), "dust.png")
-    save(npc_sheet(PAL_ROSA, ROSA_DOWN, ROSA_UP, ROSA_SIDE), "villager_rosa.png")
-    save(npc_sheet(PAL_BEN, BEN_DOWN, BEN_UP, BEN_SIDE), "villager_ben.png")
-    save(order_board(), "order_board.png")
-    save(coop(), "coop.png")
+    for name, pal, hd, hu, hs in VILLAGER_ART:
+        save(hero_sheet(pal, hd, hu, hs), name)
+    save(hd_detail(order_board(), 31, 4), "order_board.png")
+    save(hd_detail(coop(), 32, 4), "coop.png")
     save(chicken_sheet(), "chicken.png")
     save(egg(), "egg.png")
     save(machine_mayo(), "machine_mayo.png")
@@ -2458,13 +2649,13 @@ def main():
     save(ore_node((222, 120, 60)), "ore_copper.png")
     save(ore_node((210, 212, 224)), "ore_iron.png")
     save(ore_node((140, 116, 232)), "ore_gem.png")
-    save(mine_arch(), "mine_arch.png")
+    save(hd_detail(mine_arch(), 33, 4), "mine_arch.png")
     save(pet_sheet(CAT_BODY, CAT_LEGS_A, CAT_LEGS_B, CAT_PAL), "pet_cat.png")
     save(pet_sheet(DOG_BODY, DOG_LEGS_A, DOG_LEGS_B, DOG_PAL), "pet_dog.png")
     save(bunting(), "bunting.png")
     save(furnace(), "furnace.png")
     save(machine_cheese(), "machine_cheese.png")
-    save(barn(), "barn.png")
+    save(hd_detail(barn(), 34, 4), "barn.png")
     save(cow_sheet(), "cow.png")
     save(sheep_sheet(), "sheep.png")
     save(sprinkler2(), "sprinkler2.png")

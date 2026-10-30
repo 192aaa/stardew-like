@@ -32,6 +32,29 @@ func near(p: Vector2) -> bool:
 	return false
 
 
+## 范围内矿岩数量（阿铁「爆破」施放前预判用）
+func count_within(center: Vector2, radius: float) -> int:
+	var n := 0
+	for o in _ores:
+		if (o.pos as Vector2).distance_to(center) <= radius:
+			n += 1
+	return n
+
+
+## 主动技能「爆破」：一次震碎范围内所有矿岩，返回被震碎的矿种数组
+func smash_around(center: Vector2, radius: float) -> Array:
+	var kinds: Array = []
+	var keep: Array = []
+	for o in _ores:
+		if (o.pos as Vector2).distance_to(center) <= radius:
+			kinds.append(String(o.kind))
+			(o.spr as Sprite2D).queue_free()
+		else:
+			keep.append(o)
+	_ores = keep
+	return kinds
+
+
 ## 存档/联机：矿岩快照
 func payload() -> Array:
 	var out: Array = []
@@ -53,6 +76,8 @@ func restore(arr: Array) -> void:
 		var spr := Sprite2D.new()
 		spr.texture = TEX_ORES[kind]
 		spr.position = Vector2(float(row[1]), float(row[2]))
+		spr.z_as_relative = false
+		spr.z_index = int((spr.position.y + 10.0) / 4.0)
 		add_child(spr)
 		_ores.append({"kind": kind, "pos": spr.position,
 				"hp": clampi(int(row[3]), 1, 3), "spr": spr})
@@ -93,6 +118,8 @@ func _spawn(n: int) -> void:
 		var spr := Sprite2D.new()
 		spr.texture = TEX_ORES[kind]
 		spr.position = p
+		spr.z_as_relative = false
+		spr.z_index = int((p.y + 10.0) / 4.0)
 		add_child(spr)
 		_ores.append({"kind": kind, "pos": p, "hp": ORE_HP[kind], "spr": spr})
 

@@ -4,8 +4,17 @@ extends CharacterBody2D
 const SPEED := 220.0
 const WALK_FRAMES := [0, 1, 0, 2]  # 站 / 迈左腿 / 站 / 迈右腿
 const TEX_DUST := preload("res://assets/dust.png")
+## 四位主角的精灵表（与 Game.HEROES 顺序一致）
+const HERO_TEX := [
+	preload("res://assets/player_lan.png"),
+	preload("res://assets/player_mo.png"),
+	preload("res://assets/player_tie.png"),
+	preload("res://assets/player_xi.png"),
+]
 
 var facing := Vector2.DOWN
+## 冲刺剩余时间（阿蓝主动技能「疾行」时由 main 调用 sprint()）
+var sprint_t := 0.0
 
 @onready var visual: Node2D = $Visual
 @onready var sprite: Sprite2D = $Visual/Sprite
@@ -13,10 +22,17 @@ var _walk_t := 0.0
 var _step_t := 0.0
 
 
+func _ready() -> void:
+	set_hero(Game.hero_id)
+
+
 func _physics_process(delta: float) -> void:
+	sprint_t = maxf(sprint_t - delta, 0.0)
 	var direction := Input.get_vector("move_left", "move_right", "move_up", "move_down")
-	velocity = direction * SPEED
+	velocity = direction * SPEED * (1.6 if sprint_t > 0.0 else 1.0)
 	move_and_slide()
+	# Y 排序：脚底 y → z_index，和树木/房屋按同一规则排序，走到树冠后会被挡住
+	z_index = int((position.y + 22.0) / 4.0)
 	if direction.length() > 0.1:
 		if absf(direction.x) > absf(direction.y):
 			facing = Vector2(signf(direction.x), 0)
@@ -32,6 +48,16 @@ func _physics_process(delta: float) -> void:
 	else:
 		_walk_t = 0.0
 		sprite.frame_coords = Vector2i(0, _row())
+
+
+## 切换主角外观（选角 / 读档后调用）
+func set_hero(id: int) -> void:
+	sprite.texture = HERO_TEX[clampi(id, 0, HERO_TEX.size() - 1)]
+
+
+## 冲刺：持续 sec 秒移速 +60%
+func sprint(sec: float) -> void:
+	sprint_t = maxf(sprint_t, sec)
 
 
 ## 精灵表行：0 朝下 / 1 朝上 / 2 侧面

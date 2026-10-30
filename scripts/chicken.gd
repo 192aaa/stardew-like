@@ -23,6 +23,7 @@ func setup(r: Rect2, pos: Vector2) -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
+	z_index = int((position.y + 13.0) / 4.0)  # Y 排序（鸡很矮，底部偏移 13）
 	if _state == "wait":
 		_sprite.frame = 0
 		_wait -= delta

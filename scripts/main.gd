@@ -4,7 +4,7 @@ extends Node2D
 
 const DAY_START_MIN := 6 * 60
 const DAY_END_MIN := 24 * 60
-const MINUTES_PER_SECOND := 12.0  # 现实 90 秒 = 游戏 1 天
+const MINUTES_PER_SECOND := 6.0  # 现实 180 秒 = 游戏 1 天（放慢节奏，一天更从容）
 
 enum Tool { HOE, CAN, SEED_PARSNIP, SEED_POTATO, SEED_STRAW, SEED_PUMP, SEED_CORN, SEED_BLUE, ROD, AXE }
 
@@ -40,6 +40,7 @@ const ChickenScript := preload("res://scripts/chicken.gd")
 const LivestockScript := preload("res://scripts/livestock.gd")
 const MineScript := preload("res://scripts/mine.gd")
 const PetScript := preload("res://scripts/pet.gd")
+const WorldChunksScript := preload("res://scripts/world_chunks.gd")
 
 ## 节日活动：每 7 天一次，两类交替（当日达标睡前结算奖励）
 const FESTS := {
@@ -104,6 +105,7 @@ const DIALOGS := {
 @onready var decor: Node2D = $Decor
 @onready var gather: Node2D = $Gather
 @onready var canvas_mod: CanvasModulate = $CanvasModulate
+@onready var sun_grade: ColorRect = $UI/Sunlight
 @onready var day_label: Label = $UI/DayTime
 @onready var gold_label: Label = $UI/Gold
 @onready var hint_label: Label = $UI/Hint
@@ -122,6 +124,16 @@ const DIALOGS := {
 	$UI/Hotbar/Slot7, $UI/Hotbar/Slot8, $UI/Hotbar/Slot9,
 	$UI/Hotbar/Slot10,
 ]
+
+## 可建造建筑在农舍东侧的 4 个固定槽位（小屋 / 矿洞入口都占一格）
+const BUILD_SLOTS := [
+	Vector2(-486, -372), Vector2(-396, -372),
+	Vector2(-306, -372), Vector2(-216, -372),
+]
+## 矿洞界面：每层 7×5 块矿岩，每敲一块消耗 6 体力
+const MINE_COLS := 7
+const MINE_ROWS := 5
+const MINE_COST := 6.0
 
 var current_tool: int = Tool.HOE
 var time_min := float(DAY_START_MIN)
@@ -160,7 +172,6 @@ var _stam_label: Label
 var _perf_low := false
 var _set_perf_btn: Button
 var _set_new_btn: Button
-var _settings_new_confirm := false
 var _daily_open := false
 var _daily_panel: PanelContainer
 var _daily_vb: VBoxContainer
@@ -196,10 +207,42 @@ var _rod_btn: Button
 
 # 矿洞 / 宠物 / 节日
 var mine: Node2D
+## 无限地图：核心农场外围的区块地形（world_chunks.gd）
+var chunks: Node2D
 var _pets: Array = []
 var _petted_today := {}
 var _pet_btns := {}
+var _pet_house: Sprite2D = null   # 宠物窝（建好后显示在农舍旁）
+var _pet_house_btn: Button = null
 var _fest_count := 0
+
+## 建筑（小屋仓库 / 矿洞入口）：V 键建造面板 + 世界里的建筑精灵
+var build_open := false
+var _build_panel: PanelContainer
+var _build_dim: ColorRect
+var _build_rows := {}        # kind -> {have: Label, btn: Button}
+var _build_gold: Label
+var _building_sprites: Array = []
+
+## 仓库界面（进小屋后）：背包 ↔ 仓库存取
+var storage_open := false
+var _storage_panel: PanelContainer
+var _storage_dim: ColorRect
+var _storage_list: VBoxContainer
+var _storage_cap: Label
+
+## 矿洞界面（进矿洞后）：逐层 7×5 矿岩
+var mine_ui_open := false
+var _mine_panel: PanelContainer
+var _mine_dim: ColorRect
+var _mine_grid: GridContainer
+var _mine_btns: Array = []
+var _mine_cells: Array = []      # {ore, done}，长度 MINE_COLS*MINE_ROWS
+var _mine_layer := 0             # 当前深度（1 起，不存档）
+var _mine_title: Label
+var _mine_stam: Label
+var _mine_info: Label
+var _mine_next_btn: Button
 
 # 钓鱼状态机：0 无 / 1 等待咬钩 / 2 咬钩窗口 / 3 搏鱼小游戏
 var fish_state := 0
@@ -229,6 +272,11 @@ var _zone_rect: ColorRect
 var _fish_icon: TextureRect
 var _prog_fill: ColorRect
 
+# 主角主动技能：冷却计时 / 阿茉「吆喝」的临时卖价加成 / HUD 技能按钮
+var _skill_cd := 0.0
+var _sell_buff_t := 0.0
+var _skill_btn: Button
+
 # 烹饪面板（灶台）
 var cook_open := false
 var _cook_panel: PanelContainer
@@ -255,8 +303,41 @@ var _boot_panel: PanelContainer
 var _boot_status: Label
 var _boot_input: LineEdit
 var _boot_btn_new: Button
-var _new_confirm := false    # 新游戏二次确认
+var _hero_panel: PanelContainer  # 新游戏选角面板
+var _hero_dim: ColorRect         # 选角时的全屏遮罩
+var _hero_back := "boot"         # 选角来源（boot / save / settings），取消时回到对应面板
+
+# 世界存档选择页：6 个存档位（进入 / 删除 / 空位新建）
+var _save_panel: PanelContainer
+var _save_dim: ColorRect
+var _save_list: VBoxContainer
+var _save_confirm := -1          # 二次确认删除的槽位号
+var _pending_slot := -1          # 新建世界时预选的空槽
+
+# 背包页面（I 键）：分类标签、物品格子、右侧详情与卖出
+var bag_open := false
+var _bag_panel: PanelContainer
+var _bag_dim: ColorRect
+var _bag_grid: GridContainer
+var _bag_tabs: Array = []
+var _bag_tab := 0
+var _bag_sel_id := ""
+var _bag_gold: Label
+var _bag_name: Label
+var _bag_cat: Label
+var _bag_hold: Label
+var _bag_unit: Label
+var _bag_note: Label
+var _bag_sell1: Button
+var _bag_sellall: Button
 var _last_season := -1       # 季节变化时重刷地表色调
+
+# 花钱传送面板（R 键 / 触屏菜单）
+var _tel_panel: PanelContainer
+var _tel_dim: ColorRect
+
+# 一键功能范围档：false=玩家附近 3×3（默认），true=全田，G 键切换
+var _aoe_all := false
 var _tex_ground_orig: Texture2D = null
 var _tex_patch_orig: Array = []
 var _minimap: Control
@@ -302,11 +383,14 @@ var _goals_labels: Array = []
 func _ready() -> void:
 	_ui_font = SystemFont.new()
 	_ui_font.font_names = PackedStringArray(["Microsoft YaHei", "SimHei", "SimSun"])
+	# 上次玩的世界存档槽：开局先读它，读档/存档都落在这个槽
+	Save.current = clampi(int(Save.setting("last_slot", 0)), 0, Save.SLOT_COUNT - 1)
 	Game.state_changed.connect(_refresh_hud)
 	Game.state_changed.connect(_ach_tick)
 	Game.skill_up.connect(_on_skill_up)
 	Game.achievement_done.connect(_on_achievement)
 	_build_shop()
+	_build_pet_house()
 	_build_craft()
 	_build_help()
 	_build_stamina()
@@ -319,12 +403,17 @@ func _ready() -> void:
 	_build_barn_products()
 	mine = MineScript.new()
 	add_child(mine)
+	chunks = WorldChunksScript.new()
+	add_child(chunks)
 	_bobber = Sprite2D.new()
 	_bobber.texture = TEX_BOBBER
 	_bobber.visible = false
+	_bobber.z_index = -2885  # 浮标贴在水面上：压在地面层之上、人和树之下
 	add_child(_bobber)
 	_build_dialog()
 	_build_hud_extras()
+	_build_bag()
+	_build_structures_ui()
 	_build_guide()
 	_build_goals()
 	_build_bundles()
@@ -352,6 +441,9 @@ func _ready() -> void:
 		_toggle_help(true)
 		_toast("欢迎回来！锄地(1) 浇水(2) 种地，7 鱼竿 8 斧镐，C 制作，H 帮助")
 	decor.set_greenhouse(Game.greenhouse_built)
+	_sync_buildings()
+	# 读档可能把玩家放到核心区外，先把周围区块补上
+	chunks.update_around(player.position, true)
 	_refresh_guide()
 	_goal_refresh()
 	_refresh_festival()
@@ -396,6 +488,11 @@ func _process(delta: float) -> void:
 		canvas_mod.color = canvas_mod.color.lerp(Color(0.62, 0.68, 0.8), 0.4)
 	elif weather == "snow":
 		canvas_mod.color = canvas_mod.color.lerp(Color(0.76, 0.82, 0.94), 0.35)
+	# 暖阳叠加随天色衰减：正午最暖，入夜自动消失
+	if sun_grade != null and sun_grade.material != null:
+		var day_lum := canvas_mod.color.get_luminance()
+		sun_grade.material.set_shader_parameter("strength",
+				clampf((day_lum - 0.34) / 0.42, 0.0, 1.0) * 0.2)
 	day_label.text = "第 %d 天 · %s %d/%d  %s · %s" % [
 		Game.day, Game.season_name(), Game.season_day(), Game.SEASON_DAYS,
 		_clock_text(), _weather_name()]
@@ -403,6 +500,7 @@ func _process(delta: float) -> void:
 		_shadow.position = _shadow.position.lerp(_shadow_tp, clampf(delta * 12.0, 0.0, 1.0))
 	_update_target()
 	_update_hint()
+	chunks.update_around(player.position)
 	# 七日目标每秒校验一次（统计口径来自累计计数，跨联机 guest 不参与结算）
 	_goal_t += delta
 	if _goal_t >= 1.0:
@@ -418,6 +516,7 @@ func _process(delta: float) -> void:
 		_toggle_dialog(false)
 	Music.update_phase(time_min, weather == "rain")
 	_update_fishing(delta)
+	_skill_tick(delta)
 	_net_tick(delta)
 
 
@@ -448,6 +547,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		if settings_open:
 			_refresh_settings_ui()
 		_toast("背景音乐已%s（M 切换）" % ("开启" if not m else "关闭"))
+	elif event.is_action_pressed("bag"):
+		if bag_open:
+			_toggle_bag(false)
+		elif not _panels_blocking() and not (_boot_panel != null and _boot_panel.visible):
+			_toggle_bag(true)  # 标题页/其它面板打开时按 I 不弹背包
 	elif event.is_action_pressed("codex"):
 		_toggle_dex(not dex_open)
 	elif event.is_action_pressed("goals"):
@@ -465,6 +569,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			_cancel_place()
 		else:
 			_toggle_craft(not craft_open)
+	elif event.is_action_pressed("build"):
+		if storage_open:
+			_toggle_storage(false)
+		elif mine_ui_open:
+			_toggle_mine_ui(false)
+		elif build_open:
+			_toggle_build(false)
+		elif not _panels_blocking() and place_mode == "":
+			_toggle_build(true)
 	elif event.is_action_pressed("help"):
 		_toggle_help(not help_open)
 	elif event.is_action_pressed("save_game"):
@@ -479,11 +592,31 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("water_all"):
 		if not _panels_blocking():
 			_water_all()
+	elif event.is_action_pressed("till_all"):
+		if not _panels_blocking():
+			_till_all()
+	elif event.is_action_pressed("plant_all"):
+		if not _panels_blocking():
+			_plant_all()
+	elif event.is_action_pressed("aoe_toggle"):
+		if not _panels_blocking():
+			_aoe_all = not _aoe_all
+			_toast("一键范围已切换为：%s（收获/浇水/开垦/种植通用）" %
+				("全部农田" if _aoe_all else "附近 3×3"))
+	elif event.is_action_pressed("teleport"):
+		if _tel_panel != null:
+			_toggle_teleport(false)
+		elif not _panels_blocking():
+			_toggle_teleport(true)
 	elif event.is_action_pressed("use"):
 		if _daily_open:
 			_toggle_daily(false)
 			return
 		if settings_open:
+			return
+		if bag_open:
+			return
+		if build_open or storage_open or mine_ui_open:
 			return
 		if help_open:
 			_toggle_help(false)
@@ -512,11 +645,22 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_shop(false)
 		else:
 			_use_tool()
+	elif event.is_action_pressed("skill"):
+		if not _panels_blocking():
+			_cast_skill()
 	elif event.is_action_pressed("interact"):
 		_interact_chain()
 	elif event.is_action_pressed("ui_cancel"):
 		if _chat_open:
 			_chat_close()
+		elif build_open:
+			_toggle_build(false)
+		elif storage_open:
+			_toggle_storage(false)
+		elif mine_ui_open:
+			_toggle_mine_ui(false)
+		elif bag_open:
+			_toggle_bag(false)
 		elif _daily_open:
 			_toggle_daily(false)
 		elif settings_open:
@@ -549,7 +693,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			and event.pressed and not shop_open and not craft_open \
 			and not orders_open and not dex_open and place_mode == "" \
 			and not cook_open and not gift_open and not settings_open \
-			and not bundles_open and not _daily_open and not goals_open:
+			and not bundles_open and not _daily_open and not goals_open \
+			and not bag_open and not build_open and not storage_open \
+			and not mine_ui_open:
 		_use_tool()
 
 
@@ -558,6 +704,8 @@ func _unhandled_input(event: InputEvent) -> void:
 ## E 键交互链：面板开关 / 摘野莓 / 收蛋收奶 / 摸宠 / 睡觉 / 机器
 ## 联机时 guest 的突变动作改为发意图，由 host 执行后回推全量
 func _interact_chain() -> void:
+	if bag_open or build_open:
+		return
 	if help_open:
 		_toggle_help(false)
 	elif dex_open:
@@ -578,11 +726,6 @@ func _interact_chain() -> void:
 		_toggle_gift(false)
 	elif dialog_open:
 		_toggle_dialog(false)
-	elif _near_pet() != null:
-		if Net.is_guest():
-			Net.send({t = "intent", k = "pet", d = {"kind": _near_pet().kind}})
-		else:
-			_pet_pet(_near_pet())
 	elif _near_villager() != null and not _remote_exec:
 		_open_gift(_near_villager())
 	elif _berry_try() > 0:
@@ -625,6 +768,20 @@ func _interact_chain() -> void:
 					d = {"cx": m.cell.x, "cy": m.cell.y}})
 		else:
 			_machine_interact(m)
+	# 建筑门口按 E：小屋进仓库界面，矿洞入口进矿洞界面（都是独立全屏界面）
+	elif _near_building() != null:
+		_enter_building(_near_building())
+	# 宠物放在链尾：附近没有村民/野莓/货摊/机器等可交互对象时，才摸宠物或安放
+	elif _near_pet() != null:
+		if Net.is_guest():
+			Net.send({t = "intent", k = "pet", d = {"kind": _near_pet().kind}})
+		else:
+			_pet_pet(_near_pet())
+	elif _near_pet_house():
+		if Net.is_guest():
+			_toast("联机模式暂不支持安放宠物")
+		else:
+			_toggle_pets_home()
 
 
 ## 摘野莓：本地/host 真摘（入背包），guest 只做视觉（入账走意图）
@@ -784,9 +941,24 @@ func _use_tool() -> void:
 
 func _axe_action() -> void:
 	var p: Vector2 = player.position + player.facing * 36.0
+	# 树木优先：站在树旁按斧镐直接砍倒，得木材并留下树桩
+	var tree: int = decor.tree_near(p)
+	if tree >= 0:
+		if not Game.use_stamina(6.0):
+			_toast("体力不够了，回床上睡一觉吧")
+			return
+		var wood := 3 + (2 if randf() < 0.5 else 0) + Game.ore_bonus()
+		decor.chop_tree(tree)
+		Game.add_item("wood", wood)
+		Game.add_xp("gather", 8)
+		Sfx.play("axe")
+		player.pop()
+		_float_text("+%d 木材" % wood, decor.TREES[tree] + Vector2(0, 8), Color(0.8, 0.65, 0.45))
+		_toast("砍倒一棵树！获得木材 x%d（留下树桩）" % wood)
+		return
 	var is_ore: bool = mine.near(p)
 	if not is_ore and not gather.near(p):
-		_toast("附近没有能敲的石头、树枝或矿岩")
+		_toast("附近没有能砍的树、能敲的石头或矿岩")
 		return
 	if not Game.use_stamina(4.0 if is_ore else 3.0):
 		_toast("体力不够了，回床上睡一觉吧")
@@ -798,7 +970,7 @@ func _axe_action() -> void:
 		return
 	if is_ore:
 		var id: String = res.kind
-		var n := 1 if id == "gem" else 1 + (1 if randf() < 0.4 else 0)
+		var n := (1 if id == "gem" else 1 + (1 if randf() < 0.4 else 0)) + Game.ore_bonus()
 		Game.add_item(id, n)
 		Game.add_xp("gather", {"copper": 6, "iron": 8, "gem": 12}[id])
 		_toast("敲碎矿岩！获得%s x%d" % [Game.MATERIALS[id].name, n])
@@ -843,8 +1015,11 @@ func _fishing_action() -> void:
 			_hit_flash = 0.0
 			_need_hits = 5 if _fight_legend else 3
 			_max_miss = 4 if _fight_legend else 3
-			# 鱼王绿区更窄；铜钓竿让绿区变大
+			# 鱼王绿区更窄；铜钓竿让绿区变大；阿溪被动再加宽并多给一次失误
 			_zone_half = (0.10 if _fight_legend else 0.16) + (0.03 if Game.rod_lv >= 2 else 0.0)
+			if Game.hero_kind() == "fish":
+				_zone_half *= 1.2
+				_max_miss += 1
 			_next_zone()
 			_bobber.visible = false
 			_fish_icon.texture = TEX_FISH_GOLD if _fight_legend else TEX_FISH
@@ -1059,6 +1234,79 @@ func _end_fishing() -> void:
 		player.set_physics_process(true)
 
 
+# ---------- 主角主动技能（Q 键 / HUD 按钮） ----------
+
+## 每帧推进技能冷却与吆喝加成，并刷新 HUD 技能按钮文案
+func _skill_tick(delta: float) -> void:
+	_skill_cd = maxf(_skill_cd - delta, 0.0)
+	_sell_buff_t = maxf(_sell_buff_t - delta, 0.0)
+	if _skill_btn == null:
+		return
+	var h: Dictionary = Game.hero()
+	var txt := "%s Q" % h.skill_name
+	if _sell_buff_t > 0.0:
+		txt = "吆喝 %.0fs" % ceilf(_sell_buff_t)
+	elif _skill_cd > 0.0:
+		txt = "%s %.0fs" % [h.skill_name, ceilf(_skill_cd)]
+	if _skill_btn.text != txt:
+		_skill_btn.text = txt
+	_skill_btn.disabled = _skill_cd > 0.0
+
+
+## 释放主动技能：耗体力 + 进冷却，效果按主角类型分流
+func _cast_skill() -> void:
+	var h: Dictionary = Game.hero()
+	if _skill_cd > 0.0:
+		_toast("%s还在冷却，剩 %.0f 秒" % [h.skill_name, ceilf(_skill_cd)])
+		return
+	if Net.is_guest():
+		_toast("联机客人暂时借不到技能，回自己农场再用吧")
+		return
+	if fish_state != 0:
+		_toast("先把鱼竿收起来再用技能")
+		return
+	var aim: Vector2 = player.position + player.facing * 30.0
+	if Game.hero_kind() == "fish" and not decor.near_water(player.position, 60.0):
+		_toast("要靠近水边才能撒网")
+		return
+	if Game.hero_kind() == "mine" and mine.count_within(aim, 110.0) == 0:
+		_toast("身边没有矿岩，这一炮放空了")
+		return
+	if not Game.use_stamina(float(h.cost)):
+		_toast("体力不够，放不出技能")
+		return
+	_skill_cd = float(h.cd)
+	match Game.hero_kind():
+		"stamina":
+			player.sprint(4.0)
+			Sfx.play("pick")
+			_toast("疾行！4 秒内脚下生风")
+		"sell":
+			_sell_buff_t = 30.0
+			Sfx.play("coin")
+			_toast("吆喝开张！30 秒内卖价 +50%")
+		"mine":
+			player.pop()
+			Sfx.play("axe")
+			var kinds: Array = mine.smash_around(aim, 110.0)
+			var total := 0
+			for k in kinds:
+				var n := 1 + Game.ore_bonus()
+				Game.add_item(String(k), n)
+				Game.add_xp("gather", {"copper": 6, "iron": 8, "gem": 12}[k])
+				total += n
+			_toast("爆破震碎 %d 块矿岩，共得矿石 x%d" % [kinds.size(), total])
+		"fish":
+			player.pop()
+			_apply_fish(_pick_fish())
+
+
+## 卖价倍率：阿茉被动 + 临时吆喝加成（四舍五入到整数金币）
+func _sell_price(base: int) -> int:
+	var mult := Game.sell_mult() * (1.5 if _sell_buff_t > 0.0 else 1.0)
+	return int(round(float(base) * mult))
+
+
 # ---------- 存档与读档 ----------
 
 ## 组装进度：Game 全局 + 时间/工具 + 玩家位置 + 农田地块与放置物 + 订单/鸡/宠物/图鉴/成就
@@ -1084,7 +1332,8 @@ func _save_payload() -> Dictionary:
 	for o in _orders:
 		orders.append([o.kind, o.item, o.n, o.gold, o.who, int(o.done)])
 	return {
-		"day": Game.day, "gold": Game.gold,
+		"day": Game.day, "gold": Game.gold, "hero_id": Game.hero_id,
+		"saved_at": int(Time.get_unix_time_from_system()),
 		"seeds": Game.seeds, "harvest": Game.harvest, "items": Game.items,
 		"stamina": Game.stamina, "max_stamina": Game.max_stamina,
 		"hoe_level": Game.hoe_level, "can_level": Game.can_level,
@@ -1103,6 +1352,8 @@ func _save_payload() -> Dictionary:
 		"total_milk": Game.total_milk, "total_wool": Game.total_wool,
 		"total_bars": Game.total_bars, "total_cheese": Game.total_cheese,
 		"pets": Game.pets, "pet_mood": Game.pet_mood,
+		"pet_house": Game.pet_house, "pets_home": Game.pets_home,
+		"buildings": Game.buildings, "storage": Game.storage,
 		"orders_done": Game.orders_done, "orders": orders,
 		"achievements": Game.achievements.keys(),
 		"gift_milestones": Game.gift_milestones,
@@ -1113,6 +1364,7 @@ func _save_payload() -> Dictionary:
 		"total_tilled": Game.total_tilled, "total_planted": Game.total_planted,
 		"total_earned": Game.total_earned, "goals_claimed": Game.goals_claimed,
 		"greenhouse_built": Game.greenhouse_built, "bundles_done": Game.bundles_done,
+		"cut_trees": decor.cut_list(),
 	}
 
 
@@ -1125,6 +1377,10 @@ func _apply_payload(d: Dictionary) -> void:
 		d["tool"] = current_tool
 	Game.day = int(d.get("day", 1))
 	Game.gold = int(d.get("gold", 500))
+	# 主角：旧档没有 hero_id 时默认阿蓝，并补上一次体力上限加成
+	var had_hero: bool = d.has("hero_id")
+	Game.hero_id = clampi(int(d.get("hero_id", 0)), 0, Game.HEROES.size() - 1)
+	player.set_hero(Game.hero_id)
 	var seeds: Dictionary = d.get("seeds", {})
 	for k in Game.seeds:
 		if seeds.has(k):
@@ -1139,6 +1395,9 @@ func _apply_payload(d: Dictionary) -> void:
 			Game.items[k] = int(items_d[k])
 	Game.stamina = float(d.get("stamina", 100.0))
 	Game.max_stamina = float(d.get("max_stamina", 100.0))
+	if not had_hero and Game.hero_kind() == "stamina":
+		Game.max_stamina += 20.0
+		Game.stamina += 20.0
 	Game.hoe_level = int(d.get("hoe_level", 1))
 	Game.can_level = int(d.get("can_level", 1))
 	var friends_d: Dictionary = d.get("friends", {})
@@ -1179,6 +1438,26 @@ func _apply_payload(d: Dictionary) -> void:
 	var mood_d: Dictionary = d.get("pet_mood", {})
 	for k in Game.pet_mood:
 		Game.pet_mood[k] = int(mood_d.get(k, 0))
+	Game.pet_house = bool(d.get("pet_house", false))
+	var home_d: Dictionary = d.get("pets_home", {})
+	for k in Game.pets_home:
+		Game.pets_home[k] = bool(home_d.get(k, false))
+	# 建筑与仓库存量：旧档默认没有建筑、仓库空
+	Game.buildings = []
+	for b in d.get("buildings", []):
+		if typeof(b) != TYPE_DICTIONARY:
+			continue
+		var kind := String(b.get("kind", ""))
+		var slot := int(b.get("slot", -1))
+		if Game.BUILD_DEFS.has(kind) and slot >= 0 and slot < BUILD_SLOTS.size():
+			Game.buildings.append({"kind": kind, "slot": slot})
+	Game.storage = {}
+	var st_d: Dictionary = d.get("storage", {})
+	for k in st_d:
+		if Game.items.has(k):
+			var sn := int(st_d[k])
+			if sn > 0:
+				Game.storage[k] = sn
 	Game.orders_done = int(d.get("orders_done", 0))
 	Game.total_cooked = int(d.get("total_cooked", 0))
 	Game.gift_count = int(d.get("gift_count", 0))
@@ -1209,6 +1488,8 @@ func _apply_payload(d: Dictionary) -> void:
 		if gd >= 1 and gd <= Game.DAY_GOALS.size() and bool(gc[k]):
 			Game.goals_claimed[gd] = true
 	decor.set_greenhouse(Game.greenhouse_built)
+	# 砍树状态：按存档恢复（空数组 = 所有树都在）
+	decor.restore_cut(d.get("cut_trees", []))
 	_refresh_guide()
 	_orders.clear()
 	for row in d.get("orders", []):
@@ -1231,6 +1512,7 @@ func _apply_payload(d: Dictionary) -> void:
 	_sync_livestock()
 	_refresh_barn_products()
 	_sync_pets()
+	_sync_buildings()
 	_petted_today.clear()
 	_fest_count = 0
 	_refresh_eggs()
@@ -1413,21 +1695,24 @@ func _do_sleep(passed_out: bool) -> void:
 func _panels_blocking() -> bool:
 	return sleeping or settings_open or help_open or dex_open or bundles_open \
 			or orders_open or craft_open or cook_open or gift_open or dialog_open \
-			or shop_open or _daily_open or goals_open
+			or shop_open or _daily_open or goals_open or bag_open or _tel_panel != null \
+			or build_open or storage_open or mine_ui_open
 
 
-## 一键收获：收下全农场成熟作物（每株 1 体力，体力不够就只收够的）
+## 一键收获：收下范围内成熟作物（默认玩家附近 3×3，G 可切全田；每株 1 体力）
 func _harvest_all() -> void:
 	if Net.is_guest():
 		_toast("联机模式请逐格收获")
 		return
 	var cells: Array = []
-	for c in farm.tiles:
+	for c in _aoe_cells():
+		if not farm.tiles.has(c):
+			continue
 		var t: Dictionary = farm.tiles[c]
 		if t.crop != "" and int(t.stage) >= int(Game.CROPS[t.crop].days):
 			cells.append(c)
 	if cells.is_empty():
-		_toast("农田里没有成熟作物")
+		_toast("%s没有成熟作物" % ("附近 3×3 内" if not _aoe_all else "农田里"))
 		return
 	var total := 0
 	var kinds := {}
@@ -1459,17 +1744,17 @@ func _harvest_all() -> void:
 	_toast("一键收获 %d 个：%s" % [total, "、".join(parts)])
 
 
-## 一键浇水：给所有没浇过水的土地浇水（每格 1 体力）
+## 一键浇水：给范围内没浇过水的土地浇水（默认 3×3，G 可切全田；每格 1 体力）
 func _water_all() -> void:
 	if Net.is_guest():
 		_toast("联机模式请逐格浇水")
 		return
 	var cells: Array = []
-	for c in farm.tiles:
-		if not bool(farm.tiles[c].watered):
+	for c in _aoe_cells():
+		if farm.tiles.has(c) and not bool(farm.tiles[c].watered):
 			cells.append(c)
 	if cells.is_empty():
-		_toast("所有土地都浇过水了")
+		_toast("%s都浇过水了" % ("附近的土地" if not _aoe_all else "所有土地"))
 		return
 	var done := 0
 	for c in cells:
@@ -1485,6 +1770,236 @@ func _water_all() -> void:
 	Sfx.play("water")
 	player.pop()
 	_toast("一键浇水：浇了 %d 块地（剩余体力 %d）" % [done, int(Game.stamina)])
+
+
+## 一键开垦：把范围内没开垦的格子翻一遍（默认 3×3，G 可切全田；每格 1 体力）
+func _till_all() -> void:
+	if Net.is_guest():
+		_toast("联机模式请逐格开垦")
+		return
+	var cells: Array = []
+	if _aoe_all:
+		for c in _farm_all_cells():
+			if not farm.tiles.has(c) and farm.zone_at(Vector2(c.x * 32 + 16, c.y * 32 + 16)):
+				cells.append(c)
+	else:
+		for c in _aoe_cells():
+			if not farm.tiles.has(c) and farm.zone_at(Vector2(c.x * 32 + 16, c.y * 32 + 16)):
+				cells.append(c)
+	if cells.is_empty():
+		_toast("%s都开垦过了" % ("附近的地" if not _aoe_all else "农田"))
+		return
+	var done := 0
+	for c in cells:
+		if not Game.use_stamina(1.0):
+			break
+		if farm.try_till(c) == "":
+			done += 1
+	if done <= 0:
+		_toast("体力不够了，回床上睡一觉吧")
+		return
+	Game.total_tilled += done
+	_guide_advance(0)  # 新手引导：锄地
+	_goal_check()
+	Sfx.play("hoe")
+	player.pop()
+	_toast("一键开垦：翻了 %d 块地（剩余体力 %d）" % [done, int(Game.stamina)])
+
+
+## 一键种植：按库存顺序把种子撒进范围内空着的已开垦地（默认 3×3，G 可切全田）
+func _plant_all() -> void:
+	if Net.is_guest():
+		_toast("联机模式请逐格播种")
+		return
+	var ids: Array = []
+	for t in [Tool.SEED_PARSNIP, Tool.SEED_POTATO, Tool.SEED_STRAW,
+			Tool.SEED_PUMP, Tool.SEED_CORN, Tool.SEED_BLUE]:
+		ids.append(TOOL_SEED[t])
+	var cells: Array = []
+	for c in _aoe_cells():
+		if not farm.tiles.has(c):
+			continue
+		var t2: Dictionary = farm.tiles[c]
+		if not bool(t2.tilled) or String(t2.crop) != "":
+			continue
+		if farm.sprinklers.has(c) or farm.sprinklers2.has(c):
+			continue
+		if farm.scare_cells.has(c) or farm.machines.has(c):
+			continue
+		cells.append(c)
+	if cells.is_empty():
+		_toast("%s没有空着的已开垦地，先用锄头开垦" % ("附近 3×3 内" if not _aoe_all else ""))
+		return
+	var planted := 0
+	var kinds := {}
+	for c in cells:
+		# 每格按种子库存顺序选一种「这一格季节能种」的种子，避免拿着过季种子空转
+		var gh: bool = farm.in_greenhouse(c)
+		var id := ""
+		for s in ids:
+			if int(Game.seeds[s]) > 0 and Game.can_plant_in(gh, s):
+				id = s
+				break
+		if id == "":
+			break
+		if not Game.use_stamina(1.0):
+			break
+		if farm.try_plant(c, id) != "":
+			continue
+		Game.use_seed(id, 1)
+		Game.add_xp("farm", 2)
+		Game.total_planted += 1
+		planted += 1
+		kinds[id] = int(kinds.get(id, 0)) + 1
+	if planted <= 0:
+		_toast("没有能种的种子（注意换季，冬天休耕）")
+		return
+	_guide_advance(2)  # 新手引导：播种
+	_goal_check()
+	Sfx.play("plant")
+	player.pop()
+	var parts: Array = []
+	for k in kinds:
+		parts.append("%s x%d" % [Game.CROPS[k].name, kinds[k]])
+	_toast("一键种植 %d 株：%s" % [planted, "、".join(parts)])
+
+
+## 一键功能的目标格：默认玩家所在格为中心的 3×3，按 G 调档后为全田
+func _aoe_cells() -> Array:
+	if _aoe_all:
+		return farm.tiles.keys()
+	var pc := Vector2i(int(floor(player.position.x / 32.0)), int(floor(player.position.y / 32.0)))
+	var out: Array = []
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			out.append(pc + Vector2i(dx, dy))
+	return out
+
+
+## 所有农田区（含温室）覆盖的格子（按 32px 网格取整）
+func _farm_all_cells() -> Array:
+	var out: Array = []
+	var rects: Array = farm.ZONES.duplicate()
+	if Game.greenhouse_built:
+		rects.append(farm.GH_ZONE)
+	for r in rects:
+		var x0 := int(floor(r.position.x / 32.0))
+		var x1 := int(floor(r.end.x / 32.0)) - 1
+		var y0 := int(floor(r.position.y / 32.0))
+		var y1 := int(floor(r.end.y / 32.0)) - 1
+		for y in range(y0, y1 + 1):
+			for x in range(x0, x1 + 1):
+				var c := Vector2i(x, y)
+				if not out.has(c):
+					out.append(c)
+	return out
+
+
+# ---------- 花钱传送 ----------
+
+const TELEPORT_COST := 200
+
+## 传送点：名称 + 说明 + 落点（脚下要离开障碍/水面）
+func _teleport_spots() -> Array:
+	return [
+		{"name": "农场门口", "desc": "回屋睡觉、整理农场", "pos": decor.DOOR_POS + Vector2(0, 44)},
+		{"name": "商店货摊", "desc": "买种子、卖作物", "pos": decor.SHOP_POS + Vector2(-70, 70)},
+		{"name": "东岸栈道", "desc": "河边钓鱼", "pos": Vector2(decor.DOCK_RECT.get_center().x, decor.DOCK_RECT.end.y - 6)},
+		{"name": "矿洞入口", "desc": "敲矿岩挖矿石", "pos": decor.MINE_POS + Vector2(-60, 90)},
+		{"name": "西侧森林", "desc": "砍树、采集野莓", "pos": Vector2(-1960, -200)},
+	]
+
+
+## 打开/关闭传送面板（每次传送花 200 金币）
+func _toggle_teleport(on: bool) -> void:
+	if not on:
+		if _tel_panel != null:
+			_tel_panel.queue_free()
+			_tel_panel = null
+		if _tel_dim != null:
+			_tel_dim.queue_free()
+			_tel_dim = null
+		get_tree().paused = false
+		return
+	if _tel_panel != null:
+		return
+	get_tree().paused = true
+	_tel_dim = ColorRect.new()
+	_tel_dim.color = Color(0.02, 0.03, 0.05, 0.6)
+	_tel_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_tel_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	$UI.add_child(_tel_dim)
+	_tel_panel = PanelContainer.new()
+	_tel_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	_tel_panel.anchor_left = 0.5
+	_tel_panel.anchor_top = 0.5
+	_tel_panel.anchor_right = 0.5
+	_tel_panel.anchor_bottom = 0.5
+	_tel_panel.offset_left = -250.0
+	_tel_panel.offset_top = -190.0
+	_tel_panel.offset_right = 250.0
+	_tel_panel.offset_bottom = 190.0
+	_tel_panel.add_theme_stylebox_override("panel", _modal_style())
+	$UI.add_child(_tel_panel)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 8)
+	_tel_panel.add_child(vb)
+	var pad := Control.new()
+	pad.custom_minimum_size = Vector2(440, 0)
+	vb.add_child(pad)
+	var title := _mk_label("花 钱 传 送", 26)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(title)
+	var sub := _mk_label("每次 %d 金币 · 当前金币 %d" % [TELEPORT_COST, Game.gold], 13)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.modulate = Color(1, 1, 1, 0.78)
+	vb.add_child(sub)
+	var hr := HSeparator.new()
+	hr.modulate = Color(1, 1, 1, 0.22)
+	vb.add_child(hr)
+	for s in _teleport_spots():
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		vb.add_child(row)
+		var vip := VBoxContainer.new()
+		vip.add_theme_constant_override("separation", 0)
+		vip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(vip)
+		var nm := _mk_label(String(s.name), 16)
+		vip.add_child(nm)
+		var ds := _mk_label(String(s.desc), 11)
+		ds.modulate = Color(1, 1, 1, 0.6)
+		vip.add_child(ds)
+		var pos: Vector2 = s.pos
+		var spot_name: String = s.name
+		var b := _mk_btn("传送 %d 金币" % TELEPORT_COST)
+		b.custom_minimum_size = Vector2(150, 34)
+		b.add_theme_font_size_override("font_size", 13)
+		b.pressed.connect(func() -> void: _teleport_to(pos, spot_name))
+		row.add_child(b)
+	var back := _mk_btn("关闭")
+	back.custom_minimum_size = Vector2(140, 34)
+	back.add_theme_font_size_override("font_size", 13)
+	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	back.pressed.connect(func() -> void: _toggle_teleport(false))
+	vb.add_child(back)
+
+
+## 扣钱并瞬移到目标点
+func _teleport_to(pos: Vector2, nm: String) -> void:
+	if Game.gold < TELEPORT_COST:
+		_toast("金币不足：传送要 %d 金币（现在 %d）" % [TELEPORT_COST, Game.gold])
+		return
+	if Net.is_guest():
+		_toast("联机模式暂不支持传送")
+		return
+	Game.add_gold(-TELEPORT_COST)
+	_toggle_teleport(false)
+	player.position = pos
+	player.velocity = Vector2.ZERO
+	chunks.update_around(pos, true)
+	Sfx.play("coin")
+	_toast("传送到了%s（花 %d 金币）" % [nm, TELEPORT_COST])
 
 
 ## 目标指引箭头要指向的位置；没有明确目标时返回 null
@@ -1694,6 +2209,16 @@ func _build_shop() -> void:
 		p_btn.pressed.connect(_adopt_pet.bind(pk))
 		p_row.add_child(p_btn)
 		_pet_btns[pk] = p_btn
+	# 宠物窝：建好后可以把猫狗安放在窝边待命
+	var ph_row := HBoxContainer.new()
+	ph_row.add_theme_constant_override("separation", 8)
+	vb.add_child(ph_row)
+	var ph_l := _mk_label("建宠物窝（在窝边按 E 让猫狗回窝待命/放出）", 14)
+	ph_l.custom_minimum_size = Vector2(300, 0)
+	ph_row.add_child(ph_l)
+	_pet_house_btn = _mk_btn("")
+	_pet_house_btn.pressed.connect(_buy_pet_house)
+	ph_row.add_child(_pet_house_btn)
 	vb.add_child(_mk_label("按 E / Esc 关闭", 12))
 
 
@@ -1765,11 +2290,12 @@ func _sell(id: String, all: bool) -> void:
 		_toast("没有可出售的%s" % Game.CROPS[id].name)
 		return
 	var n := have if all else 1
-	Game.add_gold(n * int(Game.CROPS[id].sell))
+	var unit: int = _sell_price(int(Game.CROPS[id].sell))
+	Game.add_gold(n * unit)
 	Game.remove_harvest(id, n)
 	_guide_advance(4)  # 新手引导：卖货
 	Sfx.play("coin")
-	_toast("卖出%s x%d，赚了 %d 金币" % [Game.CROPS[id].name, n, n * int(Game.CROPS[id].sell)])
+	_toast("卖出%s x%d，赚了 %d 金币" % [Game.CROPS[id].name, n, n * unit])
 
 
 func _sell_item(cat: Dictionary, id: String, all: bool) -> void:
@@ -1781,11 +2307,12 @@ func _sell_item(cat: Dictionary, id: String, all: bool) -> void:
 		_toast("背包里没有%s" % cat[id].name)
 		return
 	var n := have if all else 1
+	var unit: int = _sell_price(int(cat[id].sell))
 	Game.add_item(id, -n)
-	Game.add_gold(n * int(cat[id].sell))
+	Game.add_gold(n * unit)
 	_guide_advance(4)  # 新手引导：卖货
 	Sfx.play("coin")
-	_toast("卖出%s x%d，赚了 %d 金币" % [cat[id].name, n, n * int(cat[id].sell)])
+	_toast("卖出%s x%d，赚了 %d 金币" % [cat[id].name, n, n * unit])
 
 
 func _upgrade(which: String) -> void:
@@ -1880,6 +2407,15 @@ func _sync_pets() -> void:
 		pet.setup(kind, player)
 		add_child(pet)
 		_pets.append(pet)
+	var ap := _pet_house_pos()
+	for i in _pets.size():
+		var pn: Node2D = _pets[i]
+		# 每只宠物在窝边分左右站位，避免叠成一团
+		var off := Vector2(-34, 16) if i == 0 else Vector2(30, 20)
+		pn.set_home(ap + off, bool(Game.pets_home.get(pn.kind, false)))
+	if _pet_house != null:
+		_pet_house.visible = Game.pet_house
+		_pet_house.z_index = int((_pet_house.position.y + 34.0) / 4.0)
 	if not _pet_btns.is_empty():
 		for pk in _pet_btns:
 			var owned: bool = Game.pets.has(pk)
@@ -1889,7 +2425,7 @@ func _sync_pets() -> void:
 
 func _near_pet() -> Variant:
 	for p in _pets:
-		if player.position.distance_to((p as Node2D).position) < 52.0:
+		if player.position.distance_to((p as Node2D).position) < 84.0:
 			return p
 	return null
 
@@ -1905,6 +2441,660 @@ func _pet_pet(pet: Node2D) -> void:
 	player.pop()
 	_float_text("心情 +30", pet.position + Vector2(0, -28), Color(1, 0.75, 0.8))
 	_toast("摸了摸%s的头！心情 %d/100（满 60 次晨会叼礼物来）" % [pet.pet_name, Game.pet_mood[pet.kind]])
+
+
+## 宠物窝的位置：农舍门口东侧
+func _pet_house_pos() -> Vector2:
+	return decor.DOOR_POS + Vector2(78, 30)
+
+
+## 程序化画一只像素风小木窝（2 倍最近邻放大），建好后显示在农舍旁
+func _build_pet_house() -> void:
+	var img := Image.create(26, 22, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var roof := Color(0.44, 0.27, 0.20)
+	var roof_hi := Color(0.56, 0.36, 0.27)
+	var wall := Color(0.78, 0.55, 0.33)
+	var wall_dk := Color(0.58, 0.39, 0.23)
+	var hole := Color(0.15, 0.11, 0.09)
+	var cx := 13
+	# 人字屋顶
+	for y in 8:
+		var half := 3 + y
+		for x in range(cx - half, cx + half + 1):
+			if x < 0 or x >= 26:
+				continue
+			img.set_pixel(x, y, roof_hi if y < 2 else roof)
+	# 木墙（两侧与底部加深，当作描边）
+	for y in range(8, 21):
+		for x in range(4, 22):
+			var c := wall
+			if x <= 5 or x >= 20 or y >= 19:
+				c = wall_dk
+			img.set_pixel(x, y, c)
+	# 圆拱门洞
+	for y in range(13, 21):
+		for x in range(10, 17):
+			if y < 15 and (x <= 10 or x >= 16):
+				continue
+			img.set_pixel(x, y, hole)
+	# 门口两侧的小名牌
+	img.set_pixel(8, 17, Color(0.95, 0.90, 0.78))
+	img.set_pixel(18, 17, Color(0.95, 0.90, 0.78))
+	_pet_house = Sprite2D.new()
+	_pet_house.texture = ImageTexture.create_from_image(img)
+	_pet_house.position = _pet_house_pos()
+	_pet_house.scale = Vector2(2, 2)
+	_pet_house.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_pet_house.visible = Game.pet_house
+	add_child(_pet_house)
+
+
+## 买宠物窝（要先有猫或狗）
+func _buy_pet_house() -> void:
+	if Game.pet_house:
+		return
+	if Game.pets.is_empty():
+		_toast("先领养一只小猫或小狗，再来建窝吧")
+		return
+	if Game.gold < Game.PET_HOUSE_COST:
+		_toast("金币不足！宠物窝要 %d 金币" % Game.PET_HOUSE_COST)
+		return
+	Game.add_gold(-Game.PET_HOUSE_COST)
+	Game.pet_house = true
+	Game.pets_home = {"cat": false, "dog": false}
+	_sync_pets()
+	Sfx.play("coin")
+	_toast("建好了宠物窝！在窝边按 E 可以让小猫小狗回窝待命")
+	_refresh_hud()
+
+
+## 宠物窝是否在玩家附近
+func _near_pet_house() -> bool:
+	return Game.pet_house and _pet_house != null \
+			and player.position.distance_to(_pet_house.position) < 70.0
+
+
+## 窝边按 E：让所有宠物回家待命 / 全部放出来继续跟着人
+func _toggle_pets_home() -> void:
+	var all_home := true
+	for k in Game.pets:
+		if not bool(Game.pets_home.get(k, false)):
+			all_home = false
+	var target := not all_home
+	for k in Game.pets:
+		Game.pets_home[k] = target
+	_sync_pets()
+	Sfx.play("talk")
+	player.pop()
+	if target:
+		_toast("%s回窝歇着啦，再按 E 就能把它们叫出来" % _pets_names())
+	else:
+		_toast("%s从窝里跑出来，又开始跟着你散步了" % _pets_names())
+
+
+func _pets_names() -> String:
+	var ns: Array = []
+	for k in Game.pets:
+		ns.append("小猫" if k == "cat" else "小狗")
+	return "和".join(ns) if not ns.is_empty() else "宠物"
+
+
+# ---------- 可建造建筑 + 仓库界面 + 矿洞界面 ----------
+
+## 建筑在槽位上的世界坐标（贴图中心）
+func _building_pos(slot: int) -> Vector2:
+	if slot < 0 or slot >= BUILD_SLOTS.size():
+		return BUILD_SLOTS[0]
+	return BUILD_SLOTS[slot]
+
+
+## 玩家站在哪座建筑门口（距离 78 内返回该建筑，否则 null）
+func _near_building() -> Variant:
+	for b in Game.buildings:
+		var pos: Vector2 = _building_pos(int(b.slot)) + Vector2(0, 18)
+		if player.position.distance_to(pos) < 78.0:
+			return b
+	return null
+
+
+## 门口按 E：小屋 → 仓库界面，矿洞入口 → 矿洞界面
+func _enter_building(b: Dictionary) -> void:
+	Sfx.play("talk")
+	player.pop()
+	if String(b.kind) == "storehouse":
+		_toggle_storage(true)
+	else:
+		_toggle_mine_ui(true)
+
+
+## 程序化画建筑贴图（28×24，2 倍最近邻放大）
+func _mk_building_tex(kind: String) -> ImageTexture:
+	var img := Image.create(28, 24, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	if kind == "storehouse":
+		# 木屋仓库：人字屋顶 + 木墙 + 圆拱门 + 两扇窗
+		var roof := Color(0.46, 0.30, 0.22)
+		var roof_hi := Color(0.60, 0.40, 0.30)
+		var wall := Color(0.78, 0.58, 0.36)
+		var wall_dk := Color(0.58, 0.40, 0.24)
+		var win := Color(0.95, 0.88, 0.60)
+		var door := Color(0.16, 0.12, 0.09)
+		for y in 9:
+			var half := 3 + y
+			for x in range(14 - half, 14 + half + 1):
+				if x < 0 or x >= 28:
+					continue
+				img.set_pixel(x, y, roof_hi if y < 3 else roof)
+		for y in range(9, 23):
+			for x in range(3, 25):
+				var c := wall
+				if x <= 4 or x >= 23 or y >= 21:
+					c = wall_dk
+				img.set_pixel(x, y, c)
+		for y in range(15, 23):
+			for x in range(12, 17):
+				if y < 17 and (x <= 12 or x >= 16):
+					continue
+				img.set_pixel(x, y, door)
+		for y in range(11, 14):
+			for x in [6, 7, 8, 20, 21, 22]:
+				img.set_pixel(x, y, win)
+	else:
+		# 矿洞入口：灰色石堆 + 木支架 + 黑洞
+		var rock := Color(0.48, 0.48, 0.50)
+		var rock_hi := Color(0.62, 0.62, 0.64)
+		var dark := Color(0.08, 0.08, 0.10)
+		var wood := Color(0.55, 0.38, 0.22)
+		for y in range(4, 23):
+			var half := 3 + (y - 4)
+			for x in range(14 - half, 14 + half + 1):
+				if x < 0 or x >= 28:
+					continue
+				img.set_pixel(x, y, rock_hi if y < 8 else rock)
+		for y in range(11, 23):
+			var half := 4 if y < 13 else 6
+			for x in range(14 - half, 14 + half + 1):
+				img.set_pixel(x, y, dark)
+		for y in range(13, 23):
+			img.set_pixel(7, y, wood)
+			img.set_pixel(21, y, wood)
+		for x in range(7, 22):
+			img.set_pixel(x, 13, wood)
+	return ImageTexture.create_from_image(img)
+
+
+## 按 Game.buildings 重建世界里的建筑精灵（建造 / 读档后调用）
+func _sync_buildings() -> void:
+	for s in _building_sprites:
+		s.queue_free()
+	_building_sprites.clear()
+	for b in Game.buildings:
+		var spr := Sprite2D.new()
+		spr.texture = _mk_building_tex(String(b.kind))
+		spr.position = _building_pos(int(b.slot))
+		spr.scale = Vector2(2, 2)
+		spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		spr.z_as_relative = false
+		spr.z_index = int((spr.position.y + 24.0) / 4.0)
+		add_child(spr)
+		_building_sprites.append(spr)
+
+
+## 全屏界面打开时停住主角移动（界面不暂停世界，天色照常走）
+func _modal_freeze(on: bool) -> void:
+	if player != null:
+		player.set_physics_process(not on)
+
+
+## 全屏遮罩 + 居中面板（建造 / 仓库 / 矿洞共用同一套样式）
+func _make_modal(w: float, h: float) -> Array:
+	var dim := ColorRect.new()
+	dim.color = Color(0.02, 0.03, 0.05, 0.62)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.process_mode = Node.PROCESS_MODE_ALWAYS
+	dim.visible = false
+	$UI.add_child(dim)
+	var panel := PanelContainer.new()
+	panel.anchor_left = 0.5
+	panel.anchor_top = 0.5
+	panel.anchor_right = 0.5
+	panel.anchor_bottom = 0.5
+	panel.offset_left = -w * 0.5
+	panel.offset_top = -h * 0.5
+	panel.offset_right = w * 0.5
+	panel.offset_bottom = h * 0.5
+	panel.add_theme_stylebox_override("panel", _modal_style())
+	panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	panel.visible = false
+	$UI.add_child(panel)
+	# 遮罩与面板压到 UI 最上层：盖住小地图 / 目标条 / 物品栏，像个独立界面
+	# HUD 节点是 _ready 前面加进 $UI 的，光靠 move_child 压不住后来才加的小地图/目标条，
+	# 这里再给高 z_index，保证界面永远盖在 HUD 之上
+	dim.z_index = 900
+	panel.z_index = 901
+	$UI.move_child(dim, -1)
+	$UI.move_child(panel, -1)
+	return [dim, panel]
+
+
+## 建三个界面的 UI：建造面板（V）+ 仓库界面 + 矿洞界面
+func _build_structures_ui() -> void:
+	# ---- 建造面板 ----
+	var m := _make_modal(780.0, 280.0)
+	_build_dim = m[0]
+	_build_panel = m[1]
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 8)
+	_build_panel.add_child(vb)
+	var top := HBoxContainer.new()
+	top.add_theme_constant_override("separation", 10)
+	vb.add_child(top)
+	var title := _mk_label("建 造", 22)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(title)
+	_build_gold = _mk_label("", 14)
+	_build_gold.add_theme_color_override("font_color", Color(1, 0.86, 0.42))
+	top.add_child(_build_gold)
+	var close := _mk_btn("×")
+	close.custom_minimum_size = Vector2(34, 30)
+	close.pressed.connect(func() -> void: _toggle_build(false))
+	top.add_child(close)
+	vb.add_child(_mk_label("农舍东侧有 4 个建筑位：造好后走过去按 E 进门（都是独立界面）", 13))
+	for id in Game.BUILD_DEFS:
+		var d: Dictionary = Game.BUILD_DEFS[id]
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		vb.add_child(row)
+		var nm := _mk_label(String(d.name), 16)
+		nm.custom_minimum_size = Vector2(110, 0)
+		row.add_child(nm)
+		var desc := _mk_label(String(d.desc), 12)
+		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		desc.custom_minimum_size = Vector2(330, 0)
+		desc.modulate = Color(1, 1, 1, 0.72)
+		row.add_child(desc)
+		var cost := _mk_label("", 13)
+		cost.custom_minimum_size = Vector2(170, 0)
+		cost.add_theme_color_override("font_color", Color(1, 0.86, 0.42))
+		row.add_child(cost)
+		var btn := _mk_btn("建造")
+		btn.custom_minimum_size = Vector2(74, 30)
+		btn.pressed.connect(_buy_building.bind(id))
+		row.add_child(btn)
+		_build_rows[id] = {"btn": btn, "cost": cost}
+	vb.add_child(_mk_label("小屋仓库：进门后把背包材料存着，最多存 8 种；矿洞挖到的东西也能存", 12))
+	vb.add_child(_mk_label("矿洞入口：进门后一层层往下挖，越深铜/铁/宝石越多（每块 6 体力）", 12))
+	vb.add_child(_mk_label("按 V / Esc 关闭", 12))
+
+	# ---- 仓库界面 ----
+	var ms := _make_modal(800.0, 470.0)
+	_storage_dim = ms[0]
+	_storage_panel = ms[1]
+	var svb := VBoxContainer.new()
+	svb.add_theme_constant_override("separation", 8)
+	_storage_panel.add_child(svb)
+	var stop := HBoxContainer.new()
+	stop.add_theme_constant_override("separation", 10)
+	svb.add_child(stop)
+	var stitle := _mk_label("仓 库", 22)
+	stitle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stop.add_child(stitle)
+	_storage_cap = _mk_label("", 14)
+	_storage_cap.add_theme_color_override("font_color", Color(0.66, 0.9, 0.72))
+	stop.add_child(_storage_cap)
+	var sclose := _mk_btn("×")
+	sclose.custom_minimum_size = Vector2(34, 30)
+	sclose.pressed.connect(func() -> void: _toggle_storage(false))
+	stop.add_child(sclose)
+	svb.add_child(_mk_label("背包里的材料和加工品都能存进来，取出后直接回到背包", 13))
+	var sc := ScrollContainer.new()
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	svb.add_child(sc)
+	_storage_list = VBoxContainer.new()
+	_storage_list.add_theme_constant_override("separation", 6)
+	_storage_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sc.add_child(_storage_list)
+	var sfoot := HBoxContainer.new()
+	sfoot.alignment = BoxContainer.ALIGNMENT_END
+	svb.add_child(sfoot)
+	var leave := _mk_btn("离开仓库（返回农场）")
+	leave.custom_minimum_size = Vector2(200, 32)
+	leave.pressed.connect(func() -> void: _toggle_storage(false))
+	sfoot.add_child(leave)
+
+	# ---- 矿洞界面 ----
+	var mm := _make_modal(720.0, 520.0)
+	_mine_dim = mm[0]
+	_mine_panel = mm[1]
+	var mvb := VBoxContainer.new()
+	mvb.add_theme_constant_override("separation", 8)
+	_mine_panel.add_child(mvb)
+	var mtop := HBoxContainer.new()
+	mtop.add_theme_constant_override("separation", 10)
+	mvb.add_child(mtop)
+	_mine_title = _mk_label("矿洞 · 第 1 层", 20)
+	_mine_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mtop.add_child(_mine_title)
+	_mine_stam = _mk_label("", 14)
+	_mine_stam.add_theme_color_override("font_color", Color(0.72, 0.94, 0.7))
+	mtop.add_child(_mine_stam)
+	var mclose := _mk_btn("×")
+	mclose.custom_minimum_size = Vector2(34, 30)
+	mclose.pressed.connect(func() -> void: _toggle_mine_ui(false))
+	mtop.add_child(mclose)
+	_mine_info = _mk_label("", 13)
+	mvb.add_child(_mine_info)
+	_mine_grid = GridContainer.new()
+	_mine_grid.columns = MINE_COLS
+	_mine_grid.add_theme_constant_override("h_separation", 6)
+	_mine_grid.add_theme_constant_override("v_separation", 6)
+	mvb.add_child(_mine_grid)
+	for i in MINE_COLS * MINE_ROWS:
+		var rb := _mk_btn("岩")
+		rb.custom_minimum_size = Vector2(86, 62)
+		rb.add_theme_font_size_override("font_size", 17)
+		var rsb := StyleBoxFlat.new()
+		rsb.bg_color = Color(0.2, 0.22, 0.26, 0.96)
+		rsb.border_color = Color(0.44, 0.48, 0.54, 0.9)
+		rsb.set_border_width_all(1)
+		rsb.set_corner_radius_all(6)
+		rb.add_theme_stylebox_override("normal", rsb)
+		var rhot := rsb.duplicate()
+		rhot.bg_color = Color(0.29, 0.32, 0.37, 0.98)
+		rb.add_theme_stylebox_override("hover", rhot)
+		rb.add_theme_stylebox_override("pressed", rhot)
+		rb.pressed.connect(_mine_strike.bind(i))
+		_mine_grid.add_child(rb)
+		_mine_btns.append(rb)
+	var mfoot := HBoxContainer.new()
+	mfoot.add_theme_constant_override("separation", 10)
+	mfoot.alignment = BoxContainer.ALIGNMENT_END
+	mvb.add_child(mfoot)
+	_mine_next_btn = _mk_btn("下一层（梯子）")
+	_mine_next_btn.custom_minimum_size = Vector2(170, 34)
+	_mine_next_btn.pressed.connect(_mine_next_layer)
+	mfoot.add_child(_mine_next_btn)
+	var mleave := _mk_btn("离开矿洞（返回农场）")
+	mleave.custom_minimum_size = Vector2(190, 34)
+	mleave.pressed.connect(func() -> void: _toggle_mine_ui(false))
+	mfoot.add_child(mleave)
+	mvb.add_child(_mk_label("敲矿岩每块 6 体力；挖空本层后梯子出现，越深越容易挖到宝石", 12))
+
+
+## 打开/关闭建造面板
+func _toggle_build(open: bool) -> void:
+	if build_open == open:
+		return
+	build_open = open
+	_build_panel.visible = open
+	_build_dim.visible = open
+	_modal_freeze(open)
+	if open:
+		_refresh_build()
+
+
+func _refresh_build() -> void:
+	if _build_gold == null:
+		return
+	_build_gold.text = "金币 %d · 木材 %d · 已用 %d/%d 位" % [
+		Game.gold, int(Game.items.get("wood", 0)),
+		Game.buildings.size(), BUILD_SLOTS.size()]
+	var full: bool = Game.buildings.size() >= BUILD_SLOTS.size()
+	for id in _build_rows:
+		var row: Dictionary = _build_rows[id]
+		var d: Dictionary = Game.BUILD_DEFS[id]
+		var btn: Button = row.btn
+		var cost_l: Label = row.cost
+		var n := 0
+		for b in Game.buildings:
+			if String(b.kind) == id:
+				n += 1
+		if full:
+			cost_l.text = "建筑位已满"
+			cost_l.add_theme_color_override("font_color", Color(1, 0.5, 0.45))
+			btn.disabled = true
+		else:
+			var ok: bool = Game.gold >= int(d.gold) \
+					and int(Game.items.get("wood", 0)) >= int(d.wood)
+			cost_l.text = "%dg + 木材 %d%s" % [int(d.gold), int(d.wood),
+					"" if n == 0 else "（已建 %d）" % n]
+			cost_l.add_theme_color_override("font_color",
+					Color(1, 0.86, 0.42) if ok else Color(1, 0.5, 0.45))
+			btn.disabled = not ok
+
+
+## 花金币 + 木材造一座建筑，占下一个空槽位
+func _buy_building(id: String) -> void:
+	var d: Dictionary = Game.BUILD_DEFS[id]
+	if Game.buildings.size() >= BUILD_SLOTS.size():
+		_toast("建筑位已经满了（最多 %d 座）" % BUILD_SLOTS.size())
+		return
+	if Game.gold < int(d.gold):
+		_toast("%s 需要 %d 金币" % [d.name, int(d.gold)])
+		return
+	if int(Game.items.get("wood", 0)) < int(d.wood):
+		_toast("木材不够：%s 需要木材 %d（砍树/捡树枝）" % [d.name, int(d.wood)])
+		return
+	Game.add_gold(-int(d.gold))
+	Game.consume({"wood": int(d.wood)})
+	Game.buildings.append({"kind": id, "slot": Game.buildings.size()})
+	_sync_buildings()
+	Sfx.play("coin")
+	_toast("建好了%s！走到农舍东侧的建筑门口按 E 进去" % d.name)
+	_refresh_build()
+
+
+## 打开/关闭仓库界面
+func _toggle_storage(open: bool) -> void:
+	if storage_open == open:
+		return
+	storage_open = open
+	_storage_panel.visible = open
+	_storage_dim.visible = open
+	_modal_freeze(open)
+	if open:
+		_refresh_storage()
+
+
+func _storage_kinds() -> int:
+	var n := 0
+	for k in Game.storage:
+		if int(Game.storage[k]) > 0:
+			n += 1
+	return n
+
+
+## 仓库行：背包数量 / 仓库数量 / 存入 / 取出
+func _refresh_storage() -> void:
+	if _storage_list == null:
+		return
+	_storage_cap.text = "已存 %d/%d 种" % [_storage_kinds(), Game.STORAGE_CAP]
+	for ch in _storage_list.get_children():
+		_storage_list.remove_child(ch)
+		ch.queue_free()
+	var ids: Array = []
+	for id in Game.items:
+		if int(Game.items[id]) > 0 or int(Game.storage.get(id, 0)) > 0:
+			ids.append(String(id))
+	if ids.is_empty():
+		_storage_list.add_child(_mk_label("背包和仓库都还空着", 13))
+		return
+	ids.sort_custom(func(a: String, b: String) -> bool:
+		return int(Game.items.get(a, 0)) + int(Game.storage.get(a, 0)) \
+				> int(Game.items.get(b, 0)) + int(Game.storage.get(b, 0)))
+	for id in ids:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		_storage_list.add_child(row)
+		var nm := _mk_label(_item_name(id), 15)
+		nm.custom_minimum_size = Vector2(190, 0)
+		row.add_child(nm)
+		var bag_l := _mk_label("背包 %d" % int(Game.items.get(id, 0)), 13)
+		bag_l.custom_minimum_size = Vector2(110, 0)
+		row.add_child(bag_l)
+		var sto_l := _mk_label("仓库 %d" % int(Game.storage.get(id, 0)), 13)
+		sto_l.custom_minimum_size = Vector2(110, 0)
+		sto_l.add_theme_color_override("font_color", Color(0.66, 0.9, 0.72))
+		row.add_child(sto_l)
+		var put := _mk_btn("存入")
+		put.custom_minimum_size = Vector2(76, 28)
+		put.disabled = int(Game.items.get(id, 0)) <= 0
+		put.pressed.connect(_storage_put.bind(id))
+		row.add_child(put)
+		var take := _mk_btn("取出")
+		take.custom_minimum_size = Vector2(76, 28)
+		take.disabled = int(Game.storage.get(id, 0)) <= 0
+		take.pressed.connect(_storage_take.bind(id))
+		row.add_child(take)
+
+
+func _storage_put(id: String) -> void:
+	var n := int(Game.items.get(id, 0))
+	if n <= 0:
+		return
+	if _storage_kinds() >= Game.STORAGE_CAP and int(Game.storage.get(id, 0)) <= 0:
+		_toast("仓库最多存 %d 种物品，先取走一些吧" % Game.STORAGE_CAP)
+		return
+	Game.items[id] = 0
+	Game.storage[id] = int(Game.storage.get(id, 0)) + n
+	Sfx.play("coin")
+	_toast("存入 %s x%d" % [_item_name(id), n])
+	Game.state_changed.emit()
+	_refresh_storage()
+
+
+func _storage_take(id: String) -> void:
+	var n := int(Game.storage.get(id, 0))
+	if n <= 0:
+		return
+	Game.storage.erase(id)
+	Game.items[id] = int(Game.items.get(id, 0)) + n
+	Sfx.play("pick")
+	_toast("取出 %s x%d" % [_item_name(id), n])
+	Game.state_changed.emit()
+	_refresh_storage()
+
+
+## 打开/关闭矿洞界面（每次进洞都从第 1 层开始）
+func _toggle_mine_ui(open: bool) -> void:
+	if mine_ui_open == open:
+		return
+	mine_ui_open = open
+	_mine_panel.visible = open
+	_mine_dim.visible = open
+	_modal_freeze(open)
+	if open:
+		_mine_layer = 0
+		_mine_new_layer()
+		_toast("进了矿洞第 1 层：点矿岩敲碎它（每块 6 体力）")
+
+
+## 生成新一层矿岩：越深铜/铁与宝石越多
+func _mine_new_layer() -> void:
+	_mine_layer += 1
+	_mine_cells.clear()
+	var gem_c: float = clampf(float(_mine_layer - 2) * 0.06, 0.0, 0.24)
+	var iron_c: float = clampf(0.10 + float(_mine_layer) * 0.03, 0.10, 0.34)
+	for i in MINE_COLS * MINE_ROWS:
+		var r := randf()
+		var ore := "stone"
+		if r < gem_c:
+			ore = "gem"
+		elif r < gem_c + iron_c:
+			ore = "iron"
+		elif r < gem_c + iron_c + 0.22:
+			ore = "copper"
+		_mine_cells.append({"ore": ore, "done": false})
+	_refresh_mine()
+
+
+func _mine_left() -> int:
+	var n := 0
+	for c in _mine_cells:
+		if not bool(c.done):
+			n += 1
+	return n
+
+
+func _refresh_mine() -> void:
+	if _mine_grid == null:
+		return
+	_mine_title.text = "矿洞 · 第 %d 层" % _mine_layer
+	_mine_stam.text = "体力 %d/%d" % [int(Game.stamina), int(Game.max_stamina)]
+	var left := _mine_left()
+	for i in _mine_cells.size():
+		var c: Dictionary = _mine_cells[i]
+		var b: Button = _mine_btns[i]
+		if bool(c.done):
+			b.text = "空"
+			b.disabled = true
+			b.modulate = Color(1, 1, 1, 0.28)
+		else:
+			b.text = _mine_symbol(String(c.ore))
+			b.disabled = false
+			b.modulate = Color(1, 1, 1, 1)
+			b.add_theme_color_override("font_color", _mine_color(String(c.ore)))
+	_mine_info.text = "本层还剩 %d 块矿岩%s" % [left,
+				"　挖空了！按「下一层」继续深入" if left == 0 else ""]
+	_mine_next_btn.disabled = left > 0 or _mine_cells.is_empty()
+
+
+## 点一块矿岩：花 6 体力敲碎，产物进背包
+func _mine_strike(i: int) -> void:
+	if i < 0 or i >= _mine_cells.size():
+		return
+	var c: Dictionary = _mine_cells[i]
+	if bool(c.done):
+		return
+	if not Game.use_stamina(MINE_COST):
+		_toast("体力不够了：回去睡觉或吃点料理再来挖")
+		return
+	var ore := String(c.ore)
+	var n := 1
+	if ore == "stone":
+		n = randi_range(1, 2)
+	n += Game.ore_bonus()
+	Game.add_item(ore, n)
+	Game.add_xp("gather", 3)
+	c["done"] = true
+	Sfx.play("pick")
+	_toast("敲出 %s x%d（-6 体力）" % [_item_name(ore), n])
+	_refresh_mine()
+
+
+func _mine_next_layer() -> void:
+	if _mine_cells.is_empty() or _mine_left() > 0:
+		_toast("先把本层矿岩挖空，梯子才会出现")
+		return
+	_mine_new_layer()
+	_toast("下到第 %d 层：越深铜/铁矿与宝石越多" % _mine_layer)
+
+
+func _mine_symbol(ore: String) -> String:
+	match ore:
+		"stone":
+			return "岩"
+		"copper":
+			return "铜"
+		"iron":
+			return "铁"
+		"gem":
+			return "宝"
+	return "?"
+
+
+func _mine_color(ore: String) -> Color:
+	match ore:
+		"copper":
+			return Color(0.98, 0.62, 0.35)
+		"iron":
+			return Color(0.76, 0.86, 0.96)
+		"gem":
+			return Color(0.88, 0.58, 0.98)
+	return Color(0.74, 0.72, 0.68)
 
 
 ## 附近的加工机；返回 {cell, data} 或 null
@@ -2984,7 +4174,7 @@ func _build_eggs() -> void:
 		var s := Sprite2D.new()
 		s.texture = TEX_EGG
 		s.position = p
-		s.z_index = 1
+		s.z_index = -2870  # 地上的蛋：在地面之上、人和动物之下
 		s.visible = false
 		add_child(s)
 		_egg_sprites.append(s)
@@ -3080,6 +4270,7 @@ func _build_barn_products() -> void:
 		var s := Sprite2D.new()
 		s.texture = TEX_MILK
 		s.position = p
+		s.z_index = -2870
 		s.visible = false
 		add_child(s)
 		_milk_sprites.append(s)
@@ -3087,6 +4278,7 @@ func _build_barn_products() -> void:
 		var s2 := Sprite2D.new()
 		s2.texture = TEX_WOOL
 		s2.position = p
+		s2.z_index = -2870
 		s2.visible = false
 		add_child(s2)
 		_wool_sprites.append(s2)
@@ -3303,9 +4495,10 @@ func _build_help() -> void:
 	col_l.add_child(title)
 	_help_section(col_l, "基础操作", [
 		"WASD / 方向键 移动　　空格 / 鼠标左键 使用工具　　E 互动",
-		"1-0 切换工具　　C 制作　　H 帮助　　Esc 设置 / 关闭　　F5 存档 / F9 读档　　M 音乐",
-		"J 一键收获全田成熟作物　　K 一键给全田浇水（每格 1 体力）",
-		"Tab 小地图放大缩小　　T 和联机好友打字聊天",
+		"1-0 切换工具　　I 背包　　C 制作　　V 建造　　H 帮助　　Esc 设置 / 关闭　　F5 存档 / F9 读档　　M 音乐",
+		"J 收获 / K 浇水 / F 开垦 / P 种植：默认玩家附近 3×3，按 G 切换全田",
+		"R 花钱传送（每次 200g）",
+		"Tab 小地图放大缩小（也能直接点小地图）　　T 和联机好友打字聊天",
 	])
 	_help_section(col_l, "种田流程", [
 		"1 锄头开垦 → 3~6/9/0 播种 → 2 浇水 → 每天浇水才生长 → 成熟后空格收获",
@@ -3327,6 +4520,7 @@ func _build_help() -> void:
 		"传说鱼王上钩时绿区很窄（价值 1200g）；12% 概率钓上宝箱",
 	])
 	_help_section(col_l, "采集与制作（8 斧镐 / C 制作）", [
+		"8 斧镐对着树按空格就能砍倒：得木材并留下树桩（砍树状态随存档保存）",
 		"敲石头得石料、敲树枝得木材，北边野莓丛按 E 采摘野莓，每天会补充刷新",
 		"洒水器浇四邻格；高级洒水器（铁锭造）浇 3x3；速效肥让作物立刻长一节",
 		"制作后移动到目标格子按空格放置，Esc 取消",
@@ -3334,7 +4528,8 @@ func _build_help() -> void:
 	_help_section(col_l, "地图与三区（轻扩图）", [
 		"西侧森林采集区：野莓、蘑菇、倒木与矿岩更密集，前期攒材料就去这儿",
 		"东侧河岸：整条河都能甩竿，沿石板小径走到木栈道上钓鱼最稳",
-		"全图 5200x2800；Tab 放大后小地图上深绿=森林、蓝色=河流，玩家白点带描边",
+		"无限地图：核心农场四周不再封边，越过边界后自动生成新地形（边走边加载、走远即卸载）",
+		"Tab 放大后小地图跟随玩家：深绿=森林、蓝色=河流，玩家白点带描边",
 	])
 	_help_section(col_l, "矿洞挖矿与熔炉（新增）", [
 		"东侧矿洞区每天刷新矿岩：8 斧镐敲击，可得铜矿/铁矿/宝石",
@@ -3355,8 +4550,12 @@ func _build_help() -> void:
 		"蛋→蛋黄酱　南瓜→派；矿→铜/铁锭　牛奶→奶酪，售价更高",
 	])
 	_help_section(col_r, "宠物与节日（新增）", [
-		"商店领养小猫/小狗（500g），摸头 +30 心情，满 60 次晨叼礼物来",
+		"商店领养小猫/小狗（500g），按 E 摸头 +30 心情；再建个宠物窝（800g）就能把它们安放在窝边",
 		"每 7 天一次节日：7 日钓鱼大赛（3 条奖 300g）、14 日丰收祭（5 株奖 400g）",
+	])
+	_help_section(col_r, "建筑与矿洞（新增）", [
+		"V 打开建造面板：小屋仓库（1200g+木20）、矿洞入口（1500g+木30），造在农舍东侧 4 个建筑位",
+		"走到建筑门口按 E 进入独立界面：仓库里背包 ↔ 仓库存取（最多 8 种）；矿洞逐层挖矿，每块 6 体力",
 	])
 	_help_section(col_r, "订单与养殖", [
 		"货摊旁任务板按 E 接订单：每天 3 张，交作物/鱼/材料得金币与好感",
@@ -3683,17 +4882,16 @@ func _on_perf_toggle() -> void:
 		"开启" if _perf_low else "关闭", "已关闭" if _perf_low else "已恢复"])
 
 
-## 设置里开始新游戏：二次确认后清档重来
+## 设置里新建世界：先存好当前世界，再挑一个空存档位选角
 func _settings_new_game() -> void:
-	if not _settings_new_confirm:
-		_settings_new_confirm = true
-		_refresh_settings_ui()
-		_toast("新游戏会清空当前存档与农场，再点一次确认")
-		return
-	_settings_new_confirm = false
-	_start_new_game()
 	_toggle_settings(false)
-	_toast("新的春天开始了！按 H 看操作说明")
+	_autosave()
+	var slot := _first_empty_slot()
+	if slot < 0:
+		_toast("6 个存档位都满了，先在存档页删掉一个世界")
+		return
+	_pending_slot = slot
+	_open_hero_select("settings")
 
 
 ## 设置里返回标题：先自动存档，再回到开局面板
@@ -3718,7 +4916,7 @@ func _refresh_settings_ui() -> void:
 	_set_sfx_pct.text = "%d%%" % sv
 	_set_touch_btn.text = _touch_label()
 	_set_perf_btn.text = "开启" if _perf_low else "关闭"
-	_set_new_btn.text = "再点一次：清空存档重来" if _settings_new_confirm else "开始新游戏"
+	_set_new_btn.text = "新建世界（不影响已有存档）"
 	_set_scale_btn.text = "%d%%" % int(roundf(float(Save.setting("ui_scale", 1.0)) * 100.0))
 	var fs: bool = DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
 	_set_fs_btn.text = "退出全屏" if fs else "进入全屏"
@@ -4018,6 +5216,10 @@ func _refresh_hud() -> void:
 			var owned: bool = Game.pets.has(pk)
 			(_pet_btns[pk] as Button).text = "已领养" if owned else "领养 %dg" % Game.PET_COST
 			(_pet_btns[pk] as Button).disabled = owned
+	# 宠物窝按钮
+	if _pet_house_btn:
+		_pet_house_btn.text = "宠物窝已建好" if Game.pet_house else "建窝 %dg" % Game.PET_HOUSE_COST
+		_pet_house_btn.disabled = Game.pet_house
 	# 制作面板行
 	if _craft_gold:
 		_craft_gold.text = "金币：%d　　材料靠斧镐(8)敲石头和树枝获得" % Game.gold
@@ -4054,8 +5256,6 @@ func _update_hint() -> void:
 	if place_mode != "":
 		txt = "走到目标格子点「用」放置（「设置」=取消）" if touch \
 				else "移动到目标格子按空格放置（Esc 取消）"
-	elif _near_pet() != null:
-		txt = "按 E 摸摸%s的头：心情 +30，每天一次" % _near_pet().pet_name
 	elif _near_villager() != null:
 		txt = "按 E 给 %s 送礼物（每天 2 份）或聊天" % _near_villager().display_name
 	elif player.position.distance_to(decor.BOARD_POS) < 70.0:
@@ -4093,12 +5293,24 @@ func _update_hint() -> void:
 		txt = "温室里无视季节：锄地(1) → 播种 → 浇水(2)，冬天也能种植"
 	elif decor.MINE_ZONE.has_point(player.position):
 		txt = "矿洞区：8 斧镐敲矿岩，可得铜矿/铁矿/宝石"
+	elif _near_building() != null:
+		var nb: Dictionary = _near_building()
+		var nd: Dictionary = Game.BUILD_DEFS[nb.kind]
+		txt = "按 E 进入%s%s" % [nd.name, "（仓库界面）" if nb.kind == "storehouse" else "（矿洞界面）"]
 	elif gather.near_bush(player.position):
 		txt = "野莓熟了：按 E 采摘，第二天会再结果"
 	elif decor.near_water(player.position, 30.0):
 		txt = "水边适合钓鱼：7 甩竿 · 咬钩后再按空格"
 	elif decor.FOREST_RECT.has_point(player.position):
 		txt = "西边森林：野莓按 E 采摘，草丛里有蘑菇与倒木可捡"
+	elif _near_pet() != null:
+		txt = "按 E 摸摸%s的头：心情 +30，每天一次" % _near_pet().pet_name
+	elif _near_pet_house():
+		var any_home := false
+		for k in Game.pets:
+			any_home = any_home or bool(Game.pets_home.get(k, false))
+		txt = "按 E 把%s叫出窝 / 让它们回窝待命" % _pets_names() if not any_home \
+				else "按 E 让%s从窝里出来继续跟随" % _pets_names()
 	else:
 		txt = "点物品栏换工具 · 「用」使用 · 「互动」E · 「菜单」里制作/存档" if touch \
 				else "1-0 切换工具 · 空格/左键 使用 · C 制作 · E 互动 · H 帮助"
@@ -4225,6 +5437,21 @@ func _build_hud_extras() -> void:
 	_chat_input.text_submitted.connect(_chat_send)
 	$UI.add_child(_chat_input)
 
+	# 主角主动技能按钮：底部中间、物品栏正上方（Q 键同效，冷却期间变灰）
+	_skill_btn = _mk_btn("技能 Q")
+	_skill_btn.anchor_left = 0.5
+	_skill_btn.anchor_right = 0.5
+	_skill_btn.anchor_top = 1.0
+	_skill_btn.anchor_bottom = 1.0
+	_skill_btn.offset_left = -38.0
+	_skill_btn.offset_right = 38.0
+	_skill_btn.offset_top = -152.0
+	_skill_btn.offset_bottom = -94.0
+	_skill_btn.focus_mode = Control.FOCUS_NONE
+	_skill_btn.add_theme_color_override("font_color", Color(1, 0.98, 0.92))
+	_skill_btn.pressed.connect(_cast_skill)
+	$UI.add_child(_skill_btn)
+
 
 ## 打开聊天输入（T 键）；输入期间停掉主角移动，避免边走边打字
 func _chat_begin() -> void:
@@ -4298,6 +5525,8 @@ func _apply_season_tint() -> void:
 	decor.modulate = Color(0.92, 0.96, 1.04) if win else Color(1, 1, 1)
 	# 四季飘落物：春花瓣 / 秋落叶 / 冬雪
 	decor.set_season(Game.season_index())
+	# 无限地图的区块地面与树跟核心区同步换季
+	chunks.set_season(win, tint, Color(0.92, 0.96, 1.04) if win else Color(1, 1, 1))
 
 
 ## 隔天天气：冬季可能下雪，其余季节 30% 下雨
@@ -4445,6 +5674,7 @@ func _update_shadow(p: Array) -> void:
 	_shadow_tp = Vector2(float(p[0]), float(p[1]))
 	if _shadow.position.distance_to(_shadow_tp) > 260.0:  # 瞬移（换场景/睡觉）时直接对齐
 		_shadow.position = _shadow_tp
+	_shadow.z_index = int((_shadow_tp.y + 22.0) / 4.0)  # 好友影子同样按脚底 y 排序
 	var spr: Sprite2D = _shadow.get_node("Spr")
 	spr.frame_coords = Vector2i(0, int(p[2]))
 	spr.flip_h = bool(p[3])
@@ -4685,24 +5915,19 @@ func _build_boot() -> void:
 	var hr := HSeparator.new()
 	vb.add_child(hr)
 	# 存档信息
-	var info := "还没有存档，从第 1 天开始"
-	if Save.has_save():
-		info = "存档：第 %d 天 · %s季第 %d 天 · %d 金币" % [
-			Game.day, Game.season_name(), Game.season_day(), Game.gold]
-	_boot_status = _mk_label(info, 13)
+	_boot_status = _mk_label(_boot_info_text(), 13)
 	_boot_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_boot_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_boot_status.custom_minimum_size = Vector2(540, 0)
 	vb.add_child(_boot_status)
-	var b_solo := _mk_btn("继续游戏" if Save.has_save() else "开始游戏")
+	var b_solo := _mk_btn("开始游戏（选择世界）")
 	b_solo.custom_minimum_size = Vector2(0, 40)
-	b_solo.pressed.connect(_boot_solo)
+	b_solo.pressed.connect(_open_save_select)
 	vb.add_child(b_solo)
-	if Save.has_save():
-		_boot_btn_new = _mk_btn("新游戏（清空存档）")
-		_boot_btn_new.custom_minimum_size = Vector2(0, 36)
-		_boot_btn_new.pressed.connect(_boot_new)
-		vb.add_child(_boot_btn_new)
+	_boot_btn_new = _mk_btn("新游戏（新建一个世界）")
+	_boot_btn_new.custom_minimum_size = Vector2(0, 36)
+	_boot_btn_new.pressed.connect(_boot_new)
+	vb.add_child(_boot_btn_new)
 	var b_host := _mk_btn("建房联机（生成房间码给好友）")
 	b_host.custom_minimum_size = Vector2(0, 40)
 	b_host.pressed.connect(_boot_host)
@@ -4739,22 +5964,34 @@ func _build_boot() -> void:
 	_arrow.visible = false
 
 
-## 新游戏：二次确认后清档重来（农场/矿洞/订单/家畜全部重置）
+## 新游戏：挑一个空存档位，再选角（不影响已有世界）
 func _boot_new() -> void:
-	if not _new_confirm:
-		_new_confirm = true
-		_boot_btn_new.text = "再点一次：确认清空存档"
-		_boot_status.text = "新游戏会清空当前存档与农场，确定要重来吗？"
+	var slot := _first_empty_slot()
+	if slot < 0:
+		_toast("6 个存档位都满了，先在存档列表里删掉一个世界")
+		_open_save_select()
 		return
-	_start_new_game()
-	_boot_status.text = "新的春天开始了！"
-	_boot_finish(false)
+	_pending_slot = slot
+	_open_hero_select("boot")
 
 
-## 从零开始：清存档 + 全局状态复位 + 世界重建
+## 第一个空存档位；全满返回 -1
+func _first_empty_slot() -> int:
+	for i in Save.SLOT_COUNT:
+		if not Save.has_slot(i):
+			return i
+	return -1
+
+
+## 从零开始：清存档 + 全局状态复位 + 世界重建（当前 Game.hero_id 决定主角）
 func _start_new_game() -> void:
 	Save.write("")
 	Game.reset_state()
+	# 阿蓝被动：体力上限 +20（reset_state 已回到 100）
+	if Game.hero_kind() == "stamina":
+		Game.max_stamina += 20.0
+		Game.stamina = Game.max_stamina
+	player.set_hero(Game.hero_id)
 	farm.restore_from({})
 	mine.restore([])
 	mine.spawn_daily()
@@ -4774,6 +6011,7 @@ func _start_new_game() -> void:
 	_last_season = Game.season_index()
 	_apply_season_tint()
 	decor.set_greenhouse(false)
+	decor.restore_cut([])  # 新世界：所有树都长回来
 	_refresh_guide()
 	_goal_refresh()
 	_refresh_festival()
@@ -4781,8 +6019,421 @@ func _start_new_game() -> void:
 	player.position = decor.DOOR_POS + Vector2(0, 44)
 
 
-func _boot_solo() -> void:
+# ---------- 选角：4 位主角（被动特长 + 主动技能） ----------
+
+## 打开选角面板：标题页「新建世界」/ 存档页空位 / 设置里新建都会走这里
+func _open_hero_select(origin := "boot") -> void:
+	if _hero_panel != null:
+		return
+	get_tree().paused = true
+	_hero_back = origin
+	if origin == "save":
+		if _save_panel != null:
+			_save_panel.visible = false
+		if _save_dim != null:
+			_save_dim.visible = false
+	elif _boot_panel != null:
+		_boot_panel.visible = false
+	# 半透明遮罩：压暗身后的农场与 HUD，让选角页成为视觉焦点
+	_hero_dim = ColorRect.new()
+	_hero_dim.color = Color(0.02, 0.03, 0.05, 0.62)
+	_hero_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_hero_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	$UI.add_child(_hero_dim)
+	_hero_panel = PanelContainer.new()
+	_hero_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	_hero_panel.anchor_left = 0.5
+	_hero_panel.anchor_top = 0.5
+	_hero_panel.anchor_right = 0.5
+	_hero_panel.anchor_bottom = 0.5
+	_hero_panel.offset_left = -500.0
+	_hero_panel.offset_top = -280.0
+	_hero_panel.offset_right = 500.0
+	_hero_panel.offset_bottom = 280.0
+	_hero_panel.add_theme_stylebox_override("panel", _modal_style())
+	$UI.add_child(_hero_panel)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	_hero_panel.add_child(vb)
+	var title := _mk_label("选 择 主 角", 30)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(title)
+	var sub := _mk_label("每人一套被动特长 + 一个主动技能（Q 键 / 右下技能按钮，耗体力、有冷却）", 13)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.modulate = Color(1, 1, 1, 0.78)
+	vb.add_child(sub)
+	var hr := HSeparator.new()
+	hr.modulate = Color(1, 1, 1, 0.25)
+	vb.add_child(hr)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 16)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vb.add_child(row)
+	for i in Game.HEROES.size():
+		row.add_child(_hero_card(i))
+	var back := _mk_btn("← 返回")
+	back.custom_minimum_size = Vector2(220, 32)
+	back.add_theme_font_size_override("font_size", 13)
+	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	back.pressed.connect(_close_hero_select)
+	vb.add_child(back)
+
+
+## 角色卡片底框：角色主色的细边框，鼠标悬停时加亮
+func _hero_card_style(c: Color, hot: bool) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.14, 0.17, 0.22, 0.96) if not hot else Color(0.19, 0.23, 0.3, 0.98)
+	sb.border_color = Color(c.r, c.g, c.b, 1.0 if hot else 0.55)
+	sb.set_border_width_all(2 if hot else 1)
+	sb.set_corner_radius_all(8)
+	sb.content_margin_left = 8
+	sb.content_margin_right = 8
+	sb.content_margin_top = 6
+	sb.content_margin_bottom = 8
+	return sb
+
+
+## 单张角色卡：顶部色条 + 站立立绘 + 名字 + 被动 / 主动两段说明 + 选择按钮
+func _hero_card(i: int) -> Control:
+	var h: Dictionary = Game.HEROES[i]
+	var c: Color = h.color
+	var card := PanelContainer.new()
+	card.custom_minimum_size = Vector2(214, 0)
+	card.add_theme_stylebox_override("panel", _hero_card_style(c, false))
+	card.mouse_entered.connect(func() -> void:
+		card.add_theme_stylebox_override("panel", _hero_card_style(c, true)))
+	card.mouse_exited.connect(func() -> void:
+		card.add_theme_stylebox_override("panel", _hero_card_style(c, false)))
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 5)
+	card.add_child(vb)
+	# 顶部角色主色条：一眼区分四张卡
+	var bar := ColorRect.new()
+	bar.color = Color(c.r, c.g, c.b, 0.9)
+	bar.custom_minimum_size = Vector2(0, 3)
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(bar)
+	# 立绘：32x64 单元 3 倍最近邻放大（96x192），像素不发糊
+	var at := AtlasTexture.new()
+	at.atlas = load(String(h.tex))
+	at.region = Rect2(0, 0, 32, 64)
+	var pic := TextureRect.new()
+	pic.texture = at
+	pic.custom_minimum_size = Vector2(96, 192)
+	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	pic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	pic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	vb.add_child(pic)
+	var nm := _mk_label("%s · %s" % [h.name, h.title], 18)
+	nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	nm.add_theme_color_override("font_color", c)
+	vb.add_child(nm)
+	var sep := HSeparator.new()
+	sep.modulate = Color(1, 1, 1, 0.18)
+	vb.add_child(sep)
+	# 被动 / 主动两段：标题行用角色色，描述用次级灰白；耗体力与冷却单独一行小字
+	var hp := _mk_label("被动 · %s" % h.passive_name, 13)
+	hp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hp.add_theme_color_override("font_color", Color(0.82, 0.87, 0.95))
+	vb.add_child(hp)
+	var dp := _mk_label(String(h.passive_text), 11)
+	dp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dp.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dp.custom_minimum_size = Vector2(196, 0)
+	dp.modulate = Color(1, 1, 1, 0.72)
+	vb.add_child(dp)
+	var ha := _mk_label("主动 · %s（Q）" % h.skill_name, 13)
+	ha.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ha.add_theme_color_override("font_color", c)
+	vb.add_child(ha)
+	var da := _mk_label(String(h.skill_text), 11)
+	da.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	da.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	da.custom_minimum_size = Vector2(196, 0)
+	da.modulate = Color(1, 1, 1, 0.72)
+	vb.add_child(da)
+	var dc := _mk_label("耗 %.0f 体力 · 冷却 %.0fs" % [h.cost, h.cd], 10)
+	dc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dc.modulate = Color(1, 1, 1, 0.5)
+	vb.add_child(dc)
+	var spacer := Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vb.add_child(spacer)
+	var b := _mk_btn("选 %s" % h.name)
+	b.custom_minimum_size = Vector2(0, 34)
+	b.add_theme_stylebox_override("normal", _hero_btn_style(c, false))
+	b.add_theme_stylebox_override("hover", _hero_btn_style(c, true))
+	b.add_theme_stylebox_override("pressed", _hero_btn_style(c, true))
+	b.pressed.connect(func() -> void: _pick_hero(i))
+	vb.add_child(b)
+	return card
+
+
+## 选择按钮：用角色主色铺底，悬停略亮
+func _hero_btn_style(c: Color, hot: bool) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(c.r, c.g, c.b, 0.92 if hot else 0.78)
+	sb.border_color = Color(1, 1, 1, 0.35)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(6)
+	sb.content_margin_top = 6
+	sb.content_margin_bottom = 6
+	return sb
+
+
+
+## 选定主角：切到预选存档位，清档开局并立刻写一份初始存档
+func _pick_hero(i: int) -> void:
+	Game.hero_id = i
+	if _pending_slot >= 0:
+		Save.current = _pending_slot
+		Save.set_setting("last_slot", _pending_slot)
+	_pending_slot = -1
+	_free_hero_select()
+	if _save_panel != null:
+		_close_save_select(false)
+	_start_new_game()
+	_autosave()  # 让新世界立即出现在存档列表里
 	_boot_finish(false)
+	Sfx.play("coin")
+	_toast("%s出发！被动「%s」，按 Q 释放「%s」" % [
+		Game.hero().name, Game.hero().passive_name, Game.hero().skill_name])
+
+
+## 直接销毁选角面板（不恢复来源面板）
+func _free_hero_select() -> void:
+	if _hero_panel != null:
+		_hero_panel.queue_free()
+		_hero_panel = null
+	if _hero_dim != null:
+		_hero_dim.queue_free()
+		_hero_dim = null
+
+
+## 取消选角：回到来源面板（标题页 / 存档列表），设置里则继续当前游戏
+func _close_hero_select() -> void:
+	_free_hero_select()
+	_pending_slot = -1
+	if _hero_back == "save" and _save_panel != null:
+		_save_panel.visible = true
+		if _save_dim != null:
+			_save_dim.visible = true
+		_refresh_save_list()
+	elif _boot_panel != null:
+		_boot_panel.visible = true
+		_boot_status.text = _boot_info_text()
+	else:
+		get_tree().paused = false
+
+
+# ---------- 世界存档选择页 ----------
+
+## 标题页信息行文案
+func _boot_info_text() -> String:
+	var used := Save.used_slots()
+	if used == 0:
+		return "还没有世界存档，新建一个世界开始吧"
+	return "已有 %d 个世界存档（共 %d 个存档位）" % [used, Save.SLOT_COUNT]
+
+
+## 存档选择面板：6 个世界存档位，可进入 / 删除 / 在空位新建
+func _open_save_select() -> void:
+	if _save_panel != null:
+		return
+	get_tree().paused = true
+	if _boot_panel != null:
+		_boot_panel.visible = false
+	_save_dim = ColorRect.new()
+	_save_dim.color = Color(0.02, 0.03, 0.05, 0.62)
+	_save_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_save_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	$UI.add_child(_save_dim)
+	_save_panel = PanelContainer.new()
+	_save_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	_save_panel.anchor_left = 0.5
+	_save_panel.anchor_top = 0.5
+	_save_panel.anchor_right = 0.5
+	_save_panel.anchor_bottom = 0.5
+	_save_panel.offset_left = -430.0
+	_save_panel.offset_top = -272.0
+	_save_panel.offset_right = 430.0
+	_save_panel.offset_bottom = 272.0
+	_save_panel.add_theme_stylebox_override("panel", _modal_style())
+	$UI.add_child(_save_panel)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 8)
+	_save_panel.add_child(vb)
+	var pad := Control.new()
+	pad.custom_minimum_size = Vector2(800, 0)
+	vb.add_child(pad)
+	var title := _mk_label("世 界 存 档", 28)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(title)
+	var sub := _mk_label("共 %d 个存档位 · 进入一个世界继续，或在空位新建" % Save.SLOT_COUNT, 12)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.modulate = Color(1, 1, 1, 0.72)
+	vb.add_child(sub)
+	var hr := HSeparator.new()
+	hr.modulate = Color(1, 1, 1, 0.22)
+	vb.add_child(hr)
+	_save_list = VBoxContainer.new()
+	_save_list.add_theme_constant_override("separation", 8)
+	vb.add_child(_save_list)
+	_refresh_save_list()
+	var back := _mk_btn("← 返回标题页")
+	back.custom_minimum_size = Vector2(220, 32)
+	back.add_theme_font_size_override("font_size", 13)
+	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	back.pressed.connect(func() -> void: _close_save_select())
+	vb.add_child(back)
+
+
+## 重绘 6 个存档位卡片
+func _refresh_save_list() -> void:
+	if _save_list == null:
+		return
+	for c in _save_list.get_children():
+		c.queue_free()
+	for i in Save.SLOT_COUNT:
+		_save_list.add_child(_save_slot_card(i))
+
+
+## 单个存档位：左侧世界信息，右侧进入 / 删除（空位为新建）
+func _save_slot_card(i: int) -> Control:
+	var d := Save.slot_summary(i)
+	var empty := d.is_empty()
+	var card := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.13, 0.16, 0.21, 0.95)
+	sb.border_color = Color(0.42, 0.48, 0.58, 0.5 if empty else 0.85)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(8)
+	sb.content_margin_left = 14
+	sb.content_margin_right = 14
+	sb.content_margin_top = 8
+	sb.content_margin_bottom = 8
+	card.add_theme_stylebox_override("panel", sb)
+	card.custom_minimum_size = Vector2(0, 62)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 10)
+	card.add_child(hb)
+	var info := VBoxContainer.new()
+	info.add_theme_constant_override("separation", 2)
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hb.add_child(info)
+	if empty:
+		var t0 := _mk_label("%d 号世界 · 空白" % (i + 1), 17)
+		t0.modulate = Color(1, 1, 1, 0.55)
+		info.add_child(t0)
+		var t1 := _mk_label("还没有世界，点右侧「新建世界」开始", 12)
+		t1.modulate = Color(1, 1, 1, 0.45)
+		info.add_child(t1)
+		var b_new := _mk_btn("新建世界")
+		b_new.custom_minimum_size = Vector2(120, 34)
+		b_new.add_theme_font_size_override("font_size", 14)
+		b_new.pressed.connect(func() -> void: _new_slot(i))
+		hb.add_child(b_new)
+		return card
+	var hid := clampi(int(d.get("hero_id", 0)), 0, Game.HEROES.size() - 1)
+	var hero: Dictionary = Game.HEROES[hid]
+	var c: Color = hero.color
+	var t := _mk_label("%d 号世界 · %s" % [i + 1, hero.name], 17)
+	t.add_theme_color_override("font_color", c)
+	info.add_child(t)
+	var line := _mk_label("%s · %d 金币" % [_slot_date_text(d), int(d.get("gold", 0))], 12)
+	line.modulate = Color(1, 1, 1, 0.8)
+	info.add_child(line)
+	var saved := int(d.get("saved_at", 0))
+	var tl := "上次保存：%s" % _fmt_time(saved) if saved > 0 else "尚未保存"
+	var t2 := _mk_label(tl, 11)
+	t2.modulate = Color(1, 1, 1, 0.5)
+	info.add_child(t2)
+	var b_in := _mk_btn("进入")
+	b_in.custom_minimum_size = Vector2(84, 34)
+	b_in.add_theme_font_size_override("font_size", 14)
+	b_in.add_theme_stylebox_override("normal", _hero_btn_style(c, false))
+	b_in.add_theme_stylebox_override("hover", _hero_btn_style(c, true))
+	b_in.add_theme_stylebox_override("pressed", _hero_btn_style(c, true))
+	b_in.pressed.connect(func() -> void: _enter_slot(i))
+	hb.add_child(b_in)
+	var b_del := _mk_btn("确认删除？" if _save_confirm == i else "删除")
+	b_del.custom_minimum_size = Vector2(100, 34)
+	b_del.add_theme_font_size_override("font_size", 13)
+	b_del.pressed.connect(func() -> void: _delete_slot(i))
+	hb.add_child(b_del)
+	return card
+
+
+## 存档日期 → 「第 12 天 · 春季第 12 天」
+func _slot_date_text(d: Dictionary) -> String:
+	var day := int(d.get("day", 1))
+	var idx := int(floor((day - 1) / float(Game.SEASON_DAYS))) % Game.SEASONS.size()
+	var sd := (day - 1) % Game.SEASON_DAYS + 1
+	return "第 %d 天 · %s季第 %d 天" % [day, String(Game.SEASONS[idx].name), sd]
+
+
+## 时间戳 → 「10-30 21:05」
+func _fmt_time(unix: int) -> String:
+	if unix <= 0:
+		return "—"
+	var dt := Time.get_datetime_dict_from_unix_time(unix)
+	return "%02d-%02d %02d:%02d" % [int(dt.month), int(dt.day), int(dt.hour), int(dt.minute)]
+
+
+## 进入指定世界：切槽、读档、收掉面板开局
+func _enter_slot(i: int) -> void:
+	Save.current = i
+	Save.set_setting("last_slot", i)
+	_save_confirm = -1
+	_close_save_select(false)
+	if not _do_load(false):
+		_toast("这个存档读取失败了……")
+		get_tree().paused = false
+		return
+	_last_season = Game.season_index()
+	_apply_season_tint()
+	chunks.update_around(player.position, true)
+	_boot_finish(false)
+	Sfx.play("pick")
+	_toast("已进入 %d 号世界 · 第 %d 天 · %s" % [i + 1, Game.day, Game.hero().name])
+
+
+## 空位新建：记下预选槽，进入选角
+func _new_slot(i: int) -> void:
+	_pending_slot = i
+	_save_confirm = -1
+	_open_hero_select("save")
+
+
+## 删除世界：首次点变「确认删除？」，再点才真删
+func _delete_slot(i: int) -> void:
+	if _save_confirm != i:
+		_save_confirm = i
+		_refresh_save_list()
+		return
+	_save_confirm = -1
+	Save.erase_slot(i)
+	_refresh_save_list()
+	_toast("%d 号世界已删除" % (i + 1))
+
+
+## 关闭存档页：回到标题页或直接继续游戏
+func _close_save_select(restore_boot := true) -> void:
+	if _save_panel != null:
+		_save_panel.queue_free()
+		_save_panel = null
+	if _save_dim != null:
+		_save_dim.queue_free()
+		_save_dim = null
+	_save_list = null
+	_save_confirm = -1
+	if restore_boot and _boot_panel != null:
+		_boot_panel.visible = true
+		_boot_status.text = _boot_info_text()
+	elif restore_boot:
+		get_tree().paused = false
 
 
 func _boot_host() -> void:
@@ -4853,3 +6504,403 @@ func _boot_finish(as_net: bool) -> void:
 			_toast("已加入房间 %s！移动是本地的，动作会发给房主结算" % Net.room_code)
 		else:
 			_toast("建房成功（%s），好友已就位！" % Net.room_code)
+
+
+# ---------- 背包页面（B 键 / 右上关闭） ----------
+
+## 分类标签：内部 id + 中文名；颜色见 _bag_cat_color
+const BAG_TABS := [
+	["all", "全部"], ["crop", "作物"], ["seed", "种子"],
+	["fish", "鱼"], ["ore", "矿石"], ["mat", "材料"], ["food", "料理"],
+]
+const BAG_ORE_IDS := ["copper", "iron", "gem", "copper_bar", "iron_bar"]
+
+
+## 背包面板：顶部金币与关闭、分类标签、六列物品格子（可滚动）、右侧详情与卖出
+func _build_bag() -> void:
+	_bag_dim = ColorRect.new()
+	_bag_dim.color = Color(0.02, 0.03, 0.05, 0.6)
+	_bag_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_bag_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_bag_dim.visible = false
+	$UI.add_child(_bag_dim)
+	_bag_panel = PanelContainer.new()
+	_bag_panel.anchor_left = 0.5
+	_bag_panel.anchor_top = 0.5
+	_bag_panel.anchor_right = 0.5
+	_bag_panel.anchor_bottom = 0.5
+	_bag_panel.offset_left = -500.0
+	_bag_panel.offset_top = -290.0
+	_bag_panel.offset_right = 500.0
+	_bag_panel.offset_bottom = 290.0
+	_bag_panel.add_theme_stylebox_override("panel", _modal_style())
+	_bag_panel.process_mode = Node.PROCESS_MODE_ALWAYS  # 暂停世界时面板仍可点
+	_bag_panel.visible = false
+	$UI.add_child(_bag_panel)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 8)
+	_bag_panel.add_child(vb)
+	# 顶栏：标题 · 金币 · 关闭
+	var top := HBoxContainer.new()
+	top.add_theme_constant_override("separation", 10)
+	vb.add_child(top)
+	var title := _mk_label("背 包", 24)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(title)
+	_bag_gold = _mk_label("", 14)
+	_bag_gold.add_theme_color_override("font_color", Color(1, 0.86, 0.42))
+	top.add_child(_bag_gold)
+	var close := _mk_btn("×")
+	close.custom_minimum_size = Vector2(34, 30)
+	close.add_theme_font_size_override("font_size", 16)
+	close.pressed.connect(func() -> void: _toggle_bag(false))
+	top.add_child(close)
+	# 分类标签行：整排等宽，选中项用蓝色高亮
+	var tabs := HBoxContainer.new()
+	tabs.add_theme_constant_override("separation", 6)
+	vb.add_child(tabs)
+	for i in BAG_TABS.size():
+		var tb := _mk_btn(String(BAG_TABS[i][1]))
+		tb.custom_minimum_size = Vector2(0, 28)
+		tb.add_theme_font_size_override("font_size", 12)
+		tb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tb.pressed.connect(_on_bag_tab.bind(i))
+		_bag_tabs.append(tb)
+		tabs.add_child(tb)
+	var body := HBoxContainer.new()
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation", 10)
+	vb.add_child(body)
+	var sc := ScrollContainer.new()
+	sc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	body.add_child(sc)
+	_bag_grid = GridContainer.new()
+	_bag_grid.columns = 6
+	_bag_grid.add_theme_constant_override("h_separation", 8)
+	_bag_grid.add_theme_constant_override("v_separation", 8)
+	sc.add_child(_bag_grid)
+	# 右侧详情
+	var det := PanelContainer.new()
+	det.custom_minimum_size = Vector2(250, 0)
+	det.add_theme_stylebox_override("panel", _bag_side_style())
+	body.add_child(det)
+	var dv := VBoxContainer.new()
+	dv.add_theme_constant_override("separation", 7)
+	det.add_child(dv)
+	_bag_name = _mk_label("—", 19)
+	_bag_name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_bag_name.custom_minimum_size = Vector2(214, 0)
+	dv.add_child(_bag_name)
+	_bag_cat = _mk_label("", 12)
+	_bag_cat.modulate = Color(1, 1, 1, 0.7)
+	dv.add_child(_bag_cat)
+	var sp1 := HSeparator.new()
+	sp1.modulate = Color(1, 1, 1, 0.2)
+	dv.add_child(sp1)
+	_bag_hold = _mk_label("", 13)
+	dv.add_child(_bag_hold)
+	_bag_unit = _mk_label("", 13)
+	_bag_unit.add_theme_color_override("font_color", Color(1, 0.86, 0.42))
+	dv.add_child(_bag_unit)
+	_bag_note = _mk_label("", 11)
+	_bag_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_bag_note.custom_minimum_size = Vector2(214, 0)
+	_bag_note.modulate = Color(1, 1, 1, 0.62)
+	dv.add_child(_bag_note)
+	var sp2 := Control.new()
+	sp2.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	dv.add_child(sp2)
+	_bag_sell1 = _mk_btn("卖 1 个")
+	_bag_sell1.custom_minimum_size = Vector2(0, 32)
+	_bag_sell1.add_theme_font_size_override("font_size", 13)
+	_bag_sell1.pressed.connect(_bag_sell.bind(false))
+	dv.add_child(_bag_sell1)
+	_bag_sellall = _mk_btn("全部卖出")
+	_bag_sellall.custom_minimum_size = Vector2(0, 32)
+	_bag_sellall.add_theme_font_size_override("font_size", 13)
+	_bag_sellall.pressed.connect(_bag_sell.bind(true))
+	dv.add_child(_bag_sellall)
+	var hint := _mk_label("I 关闭 · 点格子查看详情 · 卖出按角色加成即时结算", 11)
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.modulate = Color(1, 1, 1, 0.55)
+	vb.add_child(hint)
+
+
+func _modal_style() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.08, 0.1, 0.14, 0.97)
+	sb.border_color = Color(0.38, 0.5, 0.68, 0.85)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(12)
+	sb.set_content_margin_all(16)
+	sb.shadow_color = Color(0, 0, 0, 0.45)
+	sb.shadow_size = 10
+	return sb
+
+
+func _bag_side_style() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.12, 0.15, 0.2, 0.95)
+	sb.border_color = Color(0.3, 0.4, 0.55, 0.6)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(8)
+	sb.set_content_margin_all(12)
+	return sb
+
+
+## 背包格子底框：分类色细边框，选中/悬停时边框更亮
+func _bag_cell_style(c: Color, sel: bool, hot: bool) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.24, 0.3, 0.4, 0.98) if sel else Color(0.15, 0.18, 0.23, 0.96)
+	sb.border_color = Color(c.r, c.g, c.b, 1.0 if sel else (0.85 if hot else 0.5))
+	sb.set_border_width_all(2 if sel else 1)
+	sb.set_corner_radius_all(6)
+	sb.set_content_margin_all(4)
+	return sb
+
+
+func _bag_cat_color(cat: String) -> Color:
+	match cat:
+		"crop": return Color(0.55, 0.82, 0.52)
+		"seed": return Color(0.86, 0.8, 0.45)
+		"fish": return Color(0.5, 0.72, 0.95)
+		"ore": return Color(0.95, 0.7, 0.45)
+		"mat": return Color(0.82, 0.74, 0.62)
+		"food": return Color(0.95, 0.62, 0.67)
+	return Color(0.75, 0.8, 0.88)
+
+
+## 打开/关闭背包：暂停世界、压暗背景，关掉时恢复
+func _toggle_bag(open: bool) -> void:
+	if bag_open == open:
+		return
+	bag_open = open
+	_bag_panel.visible = open
+	_bag_dim.visible = open
+	get_tree().paused = open
+	if open:
+		_bag_sel_id = ""
+		_refresh_bag()
+
+
+func _on_bag_tab(i: int) -> void:
+	_bag_tab = i
+	_bag_sel_id = ""
+	_refresh_bag()
+
+
+## 分类切换与卖出后都整页重刷（格子数量不多，重建比增量更新可靠）
+func _refresh_bag() -> void:
+	if _bag_grid == null:
+		return
+	_bag_gold.text = "金币 %d" % Game.gold
+	for i in _bag_tabs.size():
+		var active: bool = i == _bag_tab
+		var tb: Button = _bag_tabs[i]
+		tb.add_theme_stylebox_override("normal", _bag_tab_style(active))
+		tb.add_theme_stylebox_override("hover", _bag_tab_style(true))
+		tb.add_theme_color_override("font_color",
+				Color(1, 1, 1) if active else Color(0.78, 0.84, 0.92))
+	for ch in _bag_grid.get_children():
+		_bag_grid.remove_child(ch)
+		ch.queue_free()
+	var entries: Array = _bag_entries()
+	var tab_id := String(BAG_TABS[_bag_tab][0])
+	var shown := 0
+	for e in entries:
+		if tab_id != "all" and String(e.cat) != tab_id:
+			continue
+		_bag_grid.add_child(_bag_cell(e))
+		shown += 1
+	if shown == 0:
+		var empty := _mk_label("这一栏还空着", 12)
+		empty.modulate = Color(1, 1, 1, 0.5)
+		_bag_grid.add_child(empty)
+	var sel: Dictionary = {}
+	for e in entries:
+		if String(e.id) == _bag_sel_id:
+			sel = e
+	if sel.is_empty():
+		_bag_sel_id = ""
+	_bag_show(sel)
+
+
+func _bag_tab_style(active: bool) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.3, 0.48, 0.68, 0.95) if active else Color(0.14, 0.17, 0.22, 0.9)
+	sb.border_color = Color(1, 1, 1, 0.25)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(5)
+	sb.content_margin_top = 4
+	sb.content_margin_bottom = 4
+	return sb
+
+
+## 背包全部条目：作物仓 / 种子袋 / 材料鱼矿加工品料理，按售价从高到低
+func _bag_entries() -> Array:
+	var out: Array = []
+	for id in Game.harvest.keys():
+		var n: int = int(Game.harvest[id])
+		if n > 0:
+			out.append({"id": id, "kind": "crop", "cat": "crop",
+				"name": String(Game.CROPS[id].name), "n": n,
+				"sell": int(Game.CROPS[id].sell)})
+	for id in Game.seeds.keys():
+		var ns: int = int(Game.seeds[id])
+		if ns > 0:
+			out.append({"id": id, "kind": "seed", "cat": "seed",
+				"name": "%s种子" % Game.CROPS[id].name, "n": ns, "sell": 0})
+	for id in Game.items.keys():
+		var ni: int = int(Game.items[id])
+		if ni <= 0:
+			continue
+		var d: Dictionary = _bag_item_data(String(id))
+		out.append({"id": id, "kind": "item", "cat": _bag_item_cat(String(id)),
+			"name": String(d.get("name", id)), "n": ni,
+			"sell": int(d.get("sell", 0))})
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if String(a.cat) != String(b.cat):
+			return String(a.cat) < String(b.cat)
+		return int(a.sell) > int(b.sell))
+	return out
+
+
+func _bag_item_data(id: String) -> Dictionary:
+	for d in [Game.FISH, Game.MATERIALS, Game.PRODUCTS, Game.DISHES]:
+		if d.has(id):
+			return d[id]
+	return {}
+
+
+func _bag_item_cat(id: String) -> String:
+	if BAG_ORE_IDS.has(id):
+		return "ore"
+	if Game.FISH.has(id):
+		return "fish"
+	if Game.PRODUCTS.has(id) or Game.DISHES.has(id):
+		return "food"
+	return "mat"
+
+
+func _bag_cat_dict(id: String) -> Dictionary:
+	for d in [Game.FISH, Game.MATERIALS, Game.PRODUCTS, Game.DISHES]:
+		if d.has(id):
+			return d
+	return Game.MATERIALS
+
+
+## 单个物品格子：物品名（自动换行）+ 右下角数量
+func _bag_cell(e: Dictionary) -> Control:
+	var c: Color = _bag_cat_color(String(e.cat))
+	var cell := PanelContainer.new()
+	cell.custom_minimum_size = Vector2(84, 84)
+	cell.add_theme_stylebox_override("panel",
+			_bag_cell_style(c, String(e.id) == _bag_sel_id, false))
+	cell.mouse_filter = Control.MOUSE_FILTER_STOP
+	var vb := VBoxContainer.new()
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_theme_constant_override("separation", 0)
+	cell.add_child(vb)
+	var nm := _mk_label(String(e.name), 11)
+	nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	nm.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	nm.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	nm.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(nm)
+	var cnt_row := HBoxContainer.new()
+	cnt_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var pad := Control.new()
+	pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cnt_row.add_child(pad)
+	var cnt := _mk_label("×%d" % int(e.n), 12)
+	cnt.add_theme_color_override("font_color", Color(c.r, c.g, c.b, 1.0))
+	cnt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cnt_row.add_child(cnt)
+	vb.add_child(cnt_row)
+	cell.gui_input.connect(_on_bag_cell_input.bind(e))
+	cell.mouse_entered.connect(func() -> void:
+		cell.add_theme_stylebox_override("panel", _bag_cell_style(
+				c, String(e.id) == _bag_sel_id, true)))
+	cell.mouse_exited.connect(func() -> void:
+		cell.add_theme_stylebox_override("panel", _bag_cell_style(
+				c, String(e.id) == _bag_sel_id, false)))
+	return cell
+
+
+func _on_bag_cell_input(ev: InputEvent, e: Dictionary) -> void:
+	if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT and ev.pressed:
+		_bag_sel_id = String(e.id)
+		_refresh_bag()
+
+
+## 右侧详情：名称、分类、持有、单价（含角色加成）、说明、卖出按钮
+func _bag_show(e: Dictionary) -> void:
+	if e.is_empty():
+		_bag_name.text = "—"
+		_bag_cat.text = "点左边的格子查看详情"
+		_bag_hold.text = ""
+		_bag_unit.text = ""
+		_bag_note.text = ""
+		_bag_sell1.disabled = true
+		_bag_sellall.disabled = true
+		_bag_sell1.text = "卖 1 个"
+		_bag_sellall.text = "全部卖出"
+		return
+	_bag_name.text = String(e.name)
+	var cat_name := ""
+	for t in BAG_TABS:
+		if String(t[0]) == String(e.cat):
+			cat_name = String(t[1])
+	var c: Color = _bag_cat_color(String(e.cat))
+	_bag_cat.text = "分类 · %s" % cat_name
+	_bag_cat.add_theme_color_override("font_color", c)
+	_bag_hold.text = "持有 %d 个" % int(e.n)
+	var unit: int = 0
+	if e.kind == "seed":
+		_bag_unit.text = "种子不能出售"
+		_bag_unit.add_theme_color_override("font_color", Color(1, 1, 1, 0.55))
+		_bag_note.text = "拿到田里种下，成熟后收获再卖钱。"
+		_bag_sell1.disabled = true
+		_bag_sellall.disabled = true
+		_bag_sell1.text = "卖 1 个"
+		_bag_sellall.text = "全部卖出"
+		return
+	unit = _sell_price(int(e.sell))
+	_bag_unit.text = "单价 %d 金币" % unit
+	_bag_unit.add_theme_color_override("font_color", Color(1, 0.86, 0.42))
+	_bag_sell1.disabled = false
+	_bag_sellall.disabled = false
+	_bag_sell1.text = "卖 1 个（+%d）" % unit
+	_bag_sellall.text = "全部卖出（+%d）" % (unit * int(e.n))
+	var tips := "作物可卖给货摊，也能交订单。"
+	match String(e.cat):
+		"fish": tips = "鱼可以卖钱，也能交订单或做料理原料。"
+		"ore": tips = "矿石用于造机器和工具升级，留着更划算。"
+		"mat": tips = "材料（木材/石料/毛奶蛋）是制作与加工的基础。"
+		"food": tips = "料理吃下能回体力，也可以直接卖钱。"
+	_bag_note.text = tips
+
+
+## 卖出：作物走 _sell（作物仓），其它走 _sell_item（背包），联机时自动转发房主
+func _bag_sell(all: bool) -> void:
+	var e: Dictionary = {}
+	for x in _bag_entries():
+		if String(x.id) == _bag_sel_id:
+			e = x
+			break
+	if e.is_empty():
+		return
+	if String(e.kind) == "seed":
+		_toast("种子卖不出去，拿去种吧")
+		return
+	if String(e.kind) == "crop":
+		_sell(String(e.id), all)
+	else:
+		_sell_item(_bag_cat_dict(String(e.id)), String(e.id), all)
+	_refresh_bag()
+
+

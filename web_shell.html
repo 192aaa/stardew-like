@@ -198,12 +198,16 @@ const GODOT_THREADS_ENABLED = $GODOT_THREADS_ENABLED;
 // 引擎 wasm 压缩加载：GitHub Pages 不对 .wasm 做 gzip，直接下原始 37.7MB 会非常慢。
 // 这里拦截引擎对 index.wasm 的 fetch，改取预压好的 index.wasm.gz（约 9.6MB），
 // 用 DecompressionStream 流式解压后交给引擎；不支持流式解压的浏览器自动退回原始 wasm。
+// 同时给 index.pck 的请求带上「主包体积」作为版本号：GitHub Pages 的静态缓存会保留旧 pck，
+// 不换 URL 的话重新部署后玩家仍会加载到旧地图。
 (function () {
-	if (typeof window.fetch !== 'function' || typeof DecompressionStream !== 'function') {
+	if (typeof window.fetch !== 'function') {
 		return;
 	}
 	const origFetch = window.fetch.bind(window);
-	const origWasmSize = (GODOT_CONFIG.fileSizes || {})['index.wasm'] || 0;
+	const sizes = GODOT_CONFIG.fileSizes || {};
+	const origWasmSize = sizes['index.wasm'] || 0;
+	const pckVersion = sizes['index.pck'] || 0;
 	window.fetch = function (input, init) {
 		let url = '';
 		try {
@@ -211,7 +215,11 @@ const GODOT_THREADS_ENABLED = $GODOT_THREADS_ENABLED;
 		} catch (e) {
 			url = '';
 		}
-		if (!/index\.wasm(\?|$)/.test(url)) {
+		if (/index\.pck(\?|$)/.test(url) && pckVersion > 0) {
+			const sep = url.indexOf('?') >= 0 ? '&' : '?';
+			return origFetch(url + sep + 'v=' + pckVersion, init);
+		}
+		if (!/index\.wasm(\?|$)/.test(url) || typeof DecompressionStream !== 'function') {
 			return origFetch(input, init);
 		}
 		return origFetch('index.wasm.gz', {cache: 'force-cache'}).then(function (resp) {

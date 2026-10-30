@@ -1,11 +1,14 @@
 extends Control
-## 右上角小地图：把世界坐标等比缩到面板里，绘制农田/建筑/矿洞/村民/宠物与两名玩家
+## 右上角小地图：无限地图下以玩家为中心的固定视窗，绘制农田/建筑/矿洞/外围林地与两名玩家
 ## 由 main.gd 每帧刷新；按 Tab 在「小/大」两档之间切换
 
-## 世界范围（与 decor.WORLD 一致，轻扩图后为 5200x2800）
-const WORLD := Rect2(-2600, -1400, 5200, 2800)
 const SIZE_S := Vector2(190, 130)
 const SIZE_L := Vector2(380, 260)
+## 地图视窗覆盖的世界尺寸（跟随玩家移动），比例与面板一致
+const VIEW_W := 2800.0
+const VIEW_H := 1915.0
+## 与 world_chunks.CHUNK 一致，用来画已加载的区块
+const CELL := 512.0
 
 const C_GROUND := {
 	"spring": Color(0.3, 0.44, 0.24),
@@ -38,7 +41,9 @@ func _ready() -> void:
 	anchor_right = 1.0
 	anchor_top = 0.0
 	anchor_bottom = 0.0
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mouse_filter = Control.MOUSE_FILTER_STOP  # 点一下地图就能放大/缩小
+	clip_contents = true  # 视窗跟随玩家后，区块/建筑矩形会超出面板，裁掉避免盖住 HUD
+	gui_input.connect(_on_gui_input)
 	_apply_size()
 
 
@@ -52,10 +57,16 @@ func _apply_size() -> void:
 	queue_redraw()
 
 
-## Tab 切换大小地图
+## Tab 或点击地图切换大小
 func toggle() -> void:
 	big = not big
 	_apply_size()
+
+
+func _on_gui_input(ev: InputEvent) -> void:
+	if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+		toggle()
+		accept_event()
 
 
 func _process(_delta: float) -> void:
@@ -63,12 +74,20 @@ func _process(_delta: float) -> void:
 		queue_redraw()
 
 
+## 当前视窗（以玩家为中心的世界矩形）
+func _view() -> Rect2:
+	var c := Vector2.ZERO
+	if main != null:
+		c = (main.player as Node2D).position
+	return Rect2(c - Vector2(VIEW_W, VIEW_H) * 0.5, Vector2(VIEW_W, VIEW_H))
+
+
 func _k() -> float:
-	return minf(size.x / WORLD.size.x, size.y / WORLD.size.y)
+	return minf(size.x / VIEW_W, size.y / VIEW_H)
 
 
 func _off() -> Vector2:
-	return -WORLD.position * _k()
+	return -_view().position * _k()
 
 
 ## 世界坐标 -> 地图坐标
@@ -95,6 +114,14 @@ func _draw() -> void:
 	var bg: Color = C_GROUND.get(gid, C_GROUND.spring)
 	# 底板 + 边框
 	draw_rect(Rect2(Vector2.ZERO, size), bg)
+	# 无限地图：已加载的区块（核心农场外的部分）铺深绿，一眼看出外面还有可走的地
+	var chunk_col: Color = C_FOREST if gid != "winter" else Color(0.52, 0.62, 0.58)
+	if main.chunks != null:
+		for c in main.chunks.active_cells():
+			var cr := Rect2(Vector2(c) * CELL, Vector2(CELL, CELL))
+			if cr.intersects(dec.WORLD):
+				continue
+			draw_rect(_r(cr), chunk_col)
 	# 三区底色：西侧森林 / 东侧河流，一眼看清能去哪
 	draw_rect(_r(dec.FOREST_RECT), C_FOREST)
 	draw_rect(_r(dec.RIVER_RECT), C_WATER)

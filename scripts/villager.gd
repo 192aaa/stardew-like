@@ -23,12 +23,14 @@ func setup(tex: Texture2D, r: Rect2, nm: String, pos: Vector2) -> void:
 	_sprite.texture = tex
 	_sprite.hframes = 4
 	_sprite.vframes = 3
+	_sprite.position = Vector2(0, -10)  # 16x32 单元：把精灵上移，脚底保持在原点 +22
 	add_child(_sprite)
 
 
 func _process(delta: float) -> void:
 	if not _sprite:
 		return
+	z_index = int((position.y + 22.0) / 4.0)  # Y 排序，和玩家/树木一致
 	if _state == "wait":
 		_wait -= delta
 		_sprite.frame_coords = Vector2i(0, 0)

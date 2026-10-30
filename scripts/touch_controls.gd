@@ -23,6 +23,7 @@ var _menu_open := false
 var _menu: PanelContainer
 var _btn_use: Button
 var _btn_act: Button
+var _btn_skill: Button
 var _btn_more: Button
 var _btn_set: Button
 var _use_timer: Timer
@@ -41,6 +42,9 @@ func _ready() -> void:
 	_btn_act = _mk_btn("互动", Vector2.ZERO, 40.0, 16)
 	_btn_act.button_down.connect(_on_act_down)
 	add_child(_btn_act)
+	_btn_skill = _mk_btn("技能", Vector2.ZERO, 44.0, 16)
+	_btn_skill.button_down.connect(_on_skill_down)
+	add_child(_btn_skill)
 	_btn_more = _mk_btn("菜单", Vector2.ZERO, 34.0, 14)
 	_btn_more.pressed.connect(_on_more_pressed)
 	add_child(_btn_more)
@@ -76,6 +80,7 @@ func _layout() -> void:
 	if _btn_use != null:
 		_place(_btn_use, Vector2(w - 130.0, h - 160.0))
 		_place(_btn_act, Vector2(w - 274.0, h - 128.0))
+		_place(_btn_skill, Vector2(w - 340.0, h - 236.0))
 		_place(_btn_more, Vector2(w - 64.0, h - 268.0))
 		_place(_btn_set, Vector2(w - 228.0, h - 242.0))
 	if _menu != null:
@@ -107,7 +112,9 @@ func _build_menu() -> void:
 	vb.add_theme_constant_override("separation", 6)
 	_menu.add_child(vb)
 	for item in [
-		["目标", "goals"], ["收获全部", "harvest_all"], ["浇水全部", "water_all"],
+		["背包", "bag"], ["目标", "goals"], ["收获全部", "harvest_all"],
+		["一键开垦", "till_all"], ["一键种植", "plant_all"], ["浇水全部", "water_all"],
+		["范围切换", "aoe_toggle"], ["建造", "build"],
 		["制作", "craft"], ["图鉴", "codex"], ["收集包", "bundle"], ["帮助", "help"],
 		["聊天", "chat"], ["地图", "minimap"], ["存档", "save_game"],
 		["读档", "load_game"],
@@ -202,7 +209,8 @@ func _blocked() -> bool:
 			or main.settings_open or main.help_open or main.dex_open \
 			or main.orders_open or main.bundles_open or main.shop_open or main.craft_open \
 			or main.cook_open or main.gift_open or main.dialog_open \
-			or main.goals_open \
+			or main.goals_open or main.build_open \
+			or main.storage_open or main.mine_ui_open \
 			or main._boot_panel != null
 
 
@@ -222,6 +230,12 @@ func _process(_d: float) -> void:
 	var set_txt := "取消" if main.place_mode != "" else "设置"
 	if _btn_set.text != set_txt:
 		_btn_set.text = set_txt
+	# 技能按钮：冷却中显示剩余秒数
+	var sk_txt := "技能"
+	if main._skill_cd > 0.0:
+		sk_txt = "%d" % int(ceilf(main._skill_cd))
+	if _btn_skill.text != sk_txt:
+		_btn_skill.text = sk_txt
 
 
 # ---------- 摇杆：_input 层捕获，手指滑出感应区也不丢 ----------
@@ -328,6 +342,11 @@ func _fire_tap(action: String) -> void:
 
 func _on_act_down() -> void:
 	_fire_tap("interact")
+
+
+## 技能按钮：冷却期间显示剩余秒数（按下仍走 main._cast_skill 的冷却判断）
+func _on_skill_down() -> void:
+	_fire_tap("skill")
 
 
 func _on_more_pressed() -> void:

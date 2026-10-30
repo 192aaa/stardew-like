@@ -8,6 +8,14 @@ const TEX_HOUSE := preload("res://assets/house.png")
 const TEX_STALL := preload("res://assets/stall.png")
 const TEX_TREE := preload("res://assets/tree.png")
 const TEX_PINE := preload("res://assets/tree2.png")
+const TEX_BIRCH := preload("res://assets/tree3.png")
+const TEX_MAPLE := preload("res://assets/tree4.png")
+const TEX_GRASS_PATCH := preload("res://assets/grass_patch.png")
+const TEX_LEAF_LITTER := preload("res://assets/leaf_litter.png")
+## 树的四种外观：橡树 / 松树 / 白桦 / 枫树
+const TREE_TEX := [TEX_TREE, TEX_PINE, TEX_BIRCH, TEX_MAPLE]
+## 地面层 z：地面装饰（小路/栅栏/河岸/森林压暗）统一压在这一层，所有立体物走绝对 z 排序
+const Z_GROUND := -2900
 const TEX_POST := preload("res://assets/fence_post.png")
 const TEX_RAIL := preload("res://assets/fence_rail.png")
 const TEX_FLOWERS := preload("res://assets/flowers.png")
@@ -191,6 +199,7 @@ var _petals: CPUParticles2D
 var _snow: CPUParticles2D
 var _leaf_emitters: Array[CPUParticles2D] = []
 var _sparkles: Array[Sprite2D] = []
+var _litter: Array[Sprite2D] = []   # 秋日落叶贴花，只在秋季显示
 var _season := 0
 # 温室：建成后绘制玻璃房并挡墙（脚本创建，读档后由 main 调用 set_greenhouse 恢复）
 var _gh_built := false
@@ -198,10 +207,17 @@ var _gh_bodies: Array = []
 # 低配模式：关掉粒子与动态氛围，移动端省电提帧
 var low_perf := false
 var _smoke: CPUParticles2D
+# 可砍树木：每棵树的树冠/树影/树桩贴花/碰撞体引用，砍倒后隐藏并留下树桩
+var _tree_sprites: Array = []
+var _tree_shadows: Array = []
+var _tree_stumps: Array = []
+var _tree_shapes: Array = []
+var _cut_trees: Array = []
 
 
 func _ready() -> void:
 	sign_font = ThemeDB.fallback_font
+	z_index = Z_GROUND  # 本节点只画地面层；立体物一律用绝对 z，才能和玩家做 Y 排序
 	# 小路的石板（固定随机种子，保证每次一致）
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7
@@ -213,11 +229,20 @@ func _ready() -> void:
 			for k in n:
 				_stones.append(a.lerp(b, (k + 0.5) / n)
 						+ Vector2(rng.randf_range(-7, 7), rng.randf_range(-6, 6)))
-	# 树木与投影（橡树 / 松树交替）
+	# 树木与投影：四种外观轮换（橡树为主、松树/白桦次之、偶尔一棵红枫）
+	_tree_sprites.clear()
+	_tree_shadows.clear()
+	_tree_stumps.clear()
 	for i in TREES.size():
 		var p: Vector2 = TREES[i]
-		_add_sprite(TEX_SHADOW, p + Vector2(0, 26))
-		_add_sprite(TEX_PINE if i % 2 == 1 else TEX_TREE, p + Vector2(0, -14))
+		var k := i % 8
+		var v := 0 if k < 3 else (1 if k < 5 else (2 if k < 7 else 3))
+		_tree_shadows.append(_add_sprite(TEX_SHADOW, p + Vector2(0, 26)))
+		_tree_sprites.append(_add_sorted(TREE_TEX[v], p + Vector2(0, -14), p.y + 34.0))
+		# 树桩：砍倒后才显示
+		var stump := _add_sorted(TEX_STUMP, p + Vector2(0, 8), p.y + 12.0)
+		stump.visible = false
+		_tree_stumps.append(stump)
 	# 野花（图集 4 种花色）
 	for i in FLOWER_POS.size():
 		_add_sprite(TEX_FLOWERS, FLOWER_POS[i], Rect2((i % 4) * 16, 0, 16, 16))
@@ -227,22 +252,22 @@ func _ready() -> void:
 	_add_sprite(TEX_POND_EDGE, POND_RECT.get_center())
 	# 扩展区：水井 / 信箱 / 原木树桩 / 蘑菇 / 花田花丛
 	_add_sprite(TEX_SHADOW, WELL_POS + Vector2(0, 20))
-	_add_sprite(TEX_WELL, WELL_POS)
-	_add_sprite(TEX_MAILBOX, MAILBOX_POS)
-	_add_sprite(TEX_LOG, LOG_POS)
-	_add_sprite(TEX_STUMP, STUMP_POS)
+	_add_sorted(TEX_WELL, WELL_POS, WELL_POS.y + 20.0)
+	_add_sorted(TEX_MAILBOX, MAILBOX_POS, MAILBOX_POS.y + 12.0)
+	_add_sorted(TEX_LOG, LOG_POS, LOG_POS.y + 7.0)
+	_add_sorted(TEX_STUMP, STUMP_POS, STUMP_POS.y + 7.0)
 	# 订单任务牌 / 鸡舍
 	_add_sprite(TEX_SHADOW, BOARD_POS + Vector2(0, 10))
-	_add_sprite(TEX_BOARD, BOARD_POS)
+	_add_sorted(TEX_BOARD, BOARD_POS, BOARD_POS.y + 24.0)
 	_add_sprite(TEX_SHADOW, COOP_POS + Vector2(0, 16))
-	_add_sprite(TEX_COOP, COOP_POS + Vector2(0, -6))
+	_add_sorted(TEX_COOP, COOP_POS + Vector2(0, -6), COOP_POS.y + 32.0)
 	# 西侧畜棚（牛羊住这里）
 	_add_sprite(TEX_SHADOW, BARN_POS + Vector2(0, 26))
-	_add_sprite(TEX_BARN, BARN_POS + Vector2(0, -6))
+	_add_sorted(TEX_BARN, BARN_POS + Vector2(0, -6), BARN_POS.y + 32.0)
 	# 东侧矿洞入口 / 节日彩旗（默认收起，节日当天挂出）
 	_add_sprite(TEX_SHADOW, MINE_POS + Vector2(0, 24))
-	_add_sprite(TEX_MINE, MINE_POS + Vector2(0, -2))
-	_bunting = _add_sprite(TEX_BUNTING, Vector2(670, -368))
+	_add_sorted(TEX_MINE, MINE_POS + Vector2(0, -2), MINE_POS.y + 24.0)
+	_bunting = _add_sorted(TEX_BUNTING, Vector2(670, -368), -356.0)
 	_bunting.visible = false
 	for p in MUSHROOM_POS:
 		_add_sprite(TEX_MUSHROOM, p)
@@ -257,17 +282,22 @@ func _ready() -> void:
 		_add_sprite(TEX_FLOWERS, fp, Rect2((i % 4) * 16, 0, 16, 16))
 	# 草丛与石子散布（避开农田/池塘/建筑/新区兴趣点）
 	_scatter_detail()
+	# 房屋与商店：立体物，走 Y 排序（玩家走到屋后会被屋顶挡住）
+	_add_sorted(TEX_HOUSE, Vector2(-660, -502), -410.0)
+	_add_sorted(TEX_STALL, STALL_RECT.get_center(), STALL_RECT.end.y)
 	# 夜景：路灯、房屋/鸡舍/畜棚窗户灯光、萤火虫、炊烟
-	_add_sprite(TEX_LAMP, LAMP_POS)
-	_glow_lamp = _add_glow(LAMP_POS + Vector2(0, -12), 1.4)
+	_add_sorted(TEX_LAMP, LAMP_POS, LAMP_POS.y + 16.0)
+	_glow_lamp = _add_glow(LAMP_POS + Vector2(0, -12), 1.4, _z(LAMP_POS.y + 16.0) + 1)
 	for p in EXTRA_LAMPS:
-		_add_sprite(TEX_LAMP, p)
-		_add_glow(p + Vector2(0, -12), 1.1)
-	_glow_window = _add_glow(Vector2(-722, -468), 2.0)
-	_glow_coop = _add_glow(COOP_POS + Vector2(-6, -14), 1.1)
-	_glow_barn = _add_glow(BARN_POS + Vector2(6, -8), 1.3)
+		_add_sorted(TEX_LAMP, p, p.y + 16.0)
+		_add_glow(p + Vector2(0, -12), 1.1, _z(p.y + 16.0) + 1)
+	_glow_window = _add_glow(Vector2(-722, -468), 2.0, _z(-410.0) + 1)
+	_glow_coop = _add_glow(COOP_POS + Vector2(-6, -14), 1.1, _z(COOP_POS.y + 32.0) + 1)
+	_glow_barn = _add_glow(BARN_POS + Vector2(6, -8), 1.3, _z(BARN_POS.y + 32.0) + 1)
 	for b in FIREFLY_BASE:
 		var f := _add_sprite(TEX_GLOW, b)
+		f.z_as_relative = false
+		f.z_index = 300
 		f.material = _add_material()
 		f.scale = Vector2(0.4, 0.4)
 		f.modulate = Color(0.85, 1.0, 0.5, 0.0)  # 黄绿色萤火
@@ -284,8 +314,9 @@ func _ready() -> void:
 	_add_blocker_circle(BOARD_POS, 9.0)
 	_add_blocker_circle(COOP_POS, 20.0)
 	_add_blocker_circle(MINE_POS + Vector2(0, 6), 24.0)
-	for p in TREES:
-		_add_blocker_circle(p + Vector2(0, 16), 12.0)
+	for i in TREES.size():
+		var tb := _add_blocker_circle(TREES[i] + Vector2(0, 16), 12.0)
+		_tree_shapes.append(tb.get_child(0) as CollisionShape2D)
 	_add_blocker_circle(WELL_POS, 18.0)
 	_add_blocker_circle(MAILBOX_POS, 5.0)
 	_add_blocker_rect(Rect2(GARDEN_RECT.position.x, GARDEN_RECT.position.y + 2, GARDEN_RECT.size.x, 6))
@@ -299,11 +330,7 @@ func _ready() -> void:
 			RIVER_RECT.size.x, RIVER_RECT.end.y - DOCK_RECT.end.y))
 	_add_blocker_rect(Rect2(DOCK_RECT.end.x, DOCK_RECT.position.y,
 			RIVER_RECT.end.x - DOCK_RECT.end.x, DOCK_RECT.size.y))
-	# 地图边界（草地 5200x2800，树墙内侧留出通行缓冲）
-	_add_blocker_rect(Rect2(-2576, -1400, 5152, 72))
-	_add_blocker_rect(Rect2(-2576, 1328, 5152, 72))
-	_add_blocker_rect(Rect2(-2600, -1400, 72, 2800))
-	_add_blocker_rect(Rect2(2528, -1400, 72, 2800))
+	# 核心农场四周不再封边：越过边界后由 world_chunks 继续生成无限地形
 
 
 func _process(delta: float) -> void:
@@ -363,6 +390,8 @@ func set_festival(on: bool) -> void:
 ## 季节氛围切换：春花瓣 / 秋落叶 / 冬雪各自显隐（main 换季时调用）
 func set_season(i: int) -> void:
 	_season = clampi(i, 0, 3)
+	for lp in _litter:
+		lp.visible = _season == 2      # 落叶碎屑只在秋季铺地
 	if _petals:
 		_petals.emitting = (not low_perf) and _season == 0
 		_petals.visible = (not low_perf) and _season == 0
@@ -424,43 +453,63 @@ func set_greenhouse(on: bool) -> void:
 	queue_redraw()
 
 
+## 草丛/石子/地皮贴花是否落在不能放的位置（农田/水面/建筑/兴趣点/已有树木）
+func _detail_blocked(p: Vector2) -> bool:
+	for z in FARM.ZONES:
+		if z.grow(8).has_point(p):
+			return true
+	if POND_RECT.grow(26).has_point(p) or HOUSE_RECT.grow(20).has_point(p) \
+			or STALL_RECT.grow(30).has_point(p) or p.distance_to(DOOR_POS) < 60:
+		return true
+	if GARDEN_RECT.grow(26).has_point(p) or p.distance_to(WELL_POS) < 70 \
+			or p.distance_to(MAILBOX_POS) < 40 or p.distance_to(LOG_POS) < 44 \
+			or p.distance_to(STUMP_POS) < 40 or p.distance_to(BOARD_POS) < 60 \
+			or p.distance_to(COOP_POS) < 70:
+		return true
+	if MINE_ZONE.grow(14).has_point(p):
+		return true
+	if RIVER_RECT.grow(26.0).has_point(p) or DOCK_RECT.grow(10.0).has_point(p):
+		return true
+	if FARM.GH_RECT.grow(12).has_point(p):
+		return true
+	for b in BUSH_SPOTS:
+		if p.distance_to(b) < 56:
+			return true
+	for t in TREES:
+		if p.distance_to(t) < 64:
+			return true
+	return false
+
+
 func _scatter_detail() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 99
 	var placed := 0
 	while placed < 78:
 		var p := Vector2(rng.randf_range(-2500, 2500), rng.randf_range(-1250, 1250))
-		var blocked := false
-		for z in FARM.ZONES:
-			if z.grow(8).has_point(p):
-				blocked = true
-		if POND_RECT.grow(26).has_point(p) or HOUSE_RECT.grow(20).has_point(p) \
-				or STALL_RECT.grow(30).has_point(p) or p.distance_to(DOOR_POS) < 60:
-			blocked = true
-		if GARDEN_RECT.grow(26).has_point(p) or p.distance_to(WELL_POS) < 70 \
-				or p.distance_to(MAILBOX_POS) < 40 or p.distance_to(LOG_POS) < 44 \
-				or p.distance_to(STUMP_POS) < 40 or p.distance_to(BOARD_POS) < 60 \
-				or p.distance_to(COOP_POS) < 70:
-			blocked = true
-		if MINE_ZONE.grow(14).has_point(p):
-			blocked = true
-		if RIVER_RECT.grow(26.0).has_point(p) or DOCK_RECT.grow(10.0).has_point(p):
-			blocked = true
-		if FARM.GH_RECT.grow(12).has_point(p):
-			blocked = true
-		for b in BUSH_SPOTS:
-			if p.distance_to(b) < 56:
-				blocked = true
-		for t in TREES:
-			if p.distance_to(t) < 64:
-				blocked = true
-		for s in _stones:
-			if s.distance_to(p) < 26:
+		var blocked := _detail_blocked(p)
+		for st in _stones:
+			if st.distance_to(p) < 26:
 				blocked = true
 		if not blocked:
 			var tex := TEX_TUFT if rng.randf() < 0.72 else TEX_STONE
 			_add_sprite(tex, p)
 			placed += 1
+	# 地皮贴花：草簇与秋叶碎屑打散 32px 平铺的重复感（纯地面层，不挡人）
+	var patches := 0
+	while patches < 170:
+		var p := Vector2(rng.randf_range(-2520, 2520), rng.randf_range(-1260, 1260))
+		if _detail_blocked(p):
+			continue
+		if rng.randf() < 0.74:
+			var gp := _add_sprite(TEX_GRASS_PATCH, p)
+			gp.flip_h = rng.randi() % 2 == 1
+		else:
+			var lp := _add_sprite(TEX_LEAF_LITTER, p)
+			lp.flip_h = rng.randi() % 2 == 1
+			lp.visible = false
+			_litter.append(lp)
+		patches += 1
 
 
 ## 白天氛围：云影 / 蝴蝶 / 树冠落叶
@@ -473,7 +522,8 @@ func _setup_ambience() -> void:
 		c.position = CLOUD_SEEDS[i]
 		var sc := 1.6 + rng.randf() * 0.9
 		c.scale = Vector2(sc, sc * (0.8 + rng.randf() * 0.3))
-		c.z_index = 1
+		c.z_as_relative = false
+		c.z_index = Z_GROUND + 10            # 云影压在地面装饰之上、立体物之下
 		c.modulate.a = 0.9
 		add_child(c)
 		_clouds.append(c)
@@ -482,7 +532,8 @@ func _setup_ambience() -> void:
 		b.texture = TEX_BUTTERFLY
 		b.hframes = 2
 		b.position = p
-		b.z_index = 1
+		b.z_as_relative = false
+		b.z_index = 320                      # 飞虫永远在角色/树冠之上
 		add_child(b)
 		_butterflies.append(b)
 	for i in range(0, TREES.size(), 2):
@@ -496,6 +547,8 @@ func _setup_ambience() -> void:
 	# 池塘水面碎光（白天闪烁）
 	for p in SPARKLE_BASE:
 		var sk := _add_sprite(TEX_GLOW, p)
+		sk.z_as_relative = false
+		sk.z_index = Z_GROUND + 8
 		sk.material = _add_material()
 		sk.scale = Vector2(0.26, 0.17)
 		sk.modulate.a = 0.0
@@ -526,7 +579,8 @@ func _make_fall_particles(tex: Texture2D, col: Color, amount: int, life: float,
 	g.set_color(0, Color(1, 1, 1, 0.95))
 	g.set_color(1, Color(1, 1, 1, 0))
 	p.color_ramp = g
-	p.z_index = 3
+	p.z_as_relative = false
+	p.z_index = 380
 	p.emitting = false
 	add_child(p)
 	return p
@@ -560,6 +614,8 @@ func _add_leaf_rain(pos: Vector2) -> void:
 	g.set_color(0, Color(1, 1, 1, 0.95))
 	g.set_color(1, Color(1, 1, 1, 0))
 	p.color_ramp = g
+	p.z_as_relative = false
+	p.z_index = 260
 	p.emitting = true
 	add_child(p)
 	_leaf_emitters.append(p)
@@ -571,13 +627,15 @@ func _add_material() -> CanvasItemMaterial:
 	return m
 
 
-func _add_glow(pos: Vector2, scale_f: float) -> Sprite2D:
+func _add_glow(pos: Vector2, scale_f: float, z := 0) -> Sprite2D:
 	var s := Sprite2D.new()
 	s.texture = TEX_GLOW
 	s.position = pos
 	s.scale = Vector2(scale_f, scale_f)
 	s.material = _add_material()
 	s.modulate.a = 0.0
+	s.z_as_relative = false
+	s.z_index = z
 	add_child(s)
 	return s
 
@@ -597,6 +655,8 @@ func _setup_smoke() -> void:
 	smoke.scale_amount_min = 0.7
 	smoke.scale_amount_max = 1.7
 	smoke.color = Color(0.88, 0.88, 0.86, 0.16)
+	smoke.z_as_relative = false
+	smoke.z_index = 420
 	smoke.emitting = true
 	add_child(smoke)
 
@@ -612,6 +672,19 @@ func _add_sprite(tex: Texture2D, pos: Vector2, region := Rect2()) -> Sprite2D:
 	return s
 
 
+## Y 排序：脚底 y → z_index（4px 一档，范围足够覆盖很远的区块）
+static func _z(feet_y: float) -> int:
+	return int(feet_y / 4.0)
+
+
+## 立体物（树/房屋/栅栏外的家具）：绝对 z，和玩家按脚底 y 一起排序
+func _add_sorted(tex: Texture2D, pos: Vector2, feet_y: float) -> Sprite2D:
+	var s := _add_sprite(tex, pos)
+	s.z_as_relative = false
+	s.z_index = _z(feet_y)
+	return s
+
+
 func _add_blocker_rect(r: Rect2) -> StaticBody2D:
 	var body := StaticBody2D.new()
 	var cs := CollisionShape2D.new()
@@ -624,7 +697,7 @@ func _add_blocker_rect(r: Rect2) -> StaticBody2D:
 	return body
 
 
-func _add_blocker_circle(pos: Vector2, radius: float) -> void:
+func _add_blocker_circle(pos: Vector2, radius: float) -> StaticBody2D:
 	var body := StaticBody2D.new()
 	var cs := CollisionShape2D.new()
 	var shape := CircleShape2D.new()
@@ -633,6 +706,58 @@ func _add_blocker_circle(pos: Vector2, radius: float) -> void:
 	body.position = pos
 	body.add_child(cs)
 	add_child(body)
+	return body
+
+
+## 离 p 最近的可砍树（按树干位置判定），没有返回 -1
+func tree_near(p: Vector2, radius := 64.0) -> int:
+	var best := -1
+	var best_d := radius
+	for i in TREES.size():
+		if _cut_trees.has(i):
+			continue
+		var d: float = p.distance_to(TREES[i] + Vector2(0, 8))
+		if d < best_d:
+			best_d = d
+			best = i
+	return best
+
+
+## 砍倒一棵树：树冠/树影隐藏，留下树桩，碰撞体停用
+func chop_tree(i: int) -> bool:
+	if i < 0 or i >= TREES.size() or _cut_trees.has(i):
+		return false
+	_cut_trees.append(i)
+	_set_cut(i, true)
+	return true
+
+
+func _set_cut(i: int, cut: bool) -> void:
+	if i < _tree_sprites.size() and _tree_sprites[i] != null:
+		(_tree_sprites[i] as Sprite2D).visible = not cut
+	if i < _tree_shadows.size() and _tree_shadows[i] != null:
+		(_tree_shadows[i] as Sprite2D).visible = not cut
+	if i < _tree_stumps.size() and _tree_stumps[i] != null:
+		(_tree_stumps[i] as Sprite2D).visible = cut
+	if i < _tree_shapes.size() and _tree_shapes[i] != null:
+		(_tree_shapes[i] as CollisionShape2D).set_deferred("disabled", cut)
+
+
+## 已砍树索引（存档用）
+func cut_list() -> Array:
+	return _cut_trees.duplicate()
+
+
+## 按存档恢复砍树状态；空数组即全部复原
+func restore_cut(list: Array) -> void:
+	_cut_trees.clear()
+	for i in TREES.size():
+		_set_cut(i, false)
+	for v in list:
+		var i := int(v)
+		if i >= 0 and i < TREES.size():
+			_cut_trees.append(i)
+			_set_cut(i, true)
 
 
 ## 池塘与东侧河都算水域；grow 为容差（河岸放宽一点，站在岸边也能甩竿）
@@ -672,17 +797,23 @@ func _draw_river() -> void:
 
 func _draw() -> void:
 	# 森林地面压深一档，与农场核心区在视觉上拉开层次
-	draw_rect(FOREST_RECT, Color(0.12, 0.2, 0.1, 0.2))
+	# 东边界用一段渐变过渡，避免出现一条突兀的直线
+	const STEPS := 14
+	var fade_w := 130.0
+	draw_rect(Rect2(FOREST_RECT.position, Vector2(FOREST_RECT.size.x - fade_w, FOREST_RECT.size.y)),
+			Color(0.12, 0.2, 0.1, 0.2))
+	for i in STEPS:
+		var k := float(i) / float(STEPS)
+		draw_rect(Rect2(FOREST_RECT.end.x - fade_w + k * fade_w, FOREST_RECT.position.y,
+				fade_w / float(STEPS) + 1.0, FOREST_RECT.size.y),
+				Color(0.12, 0.2, 0.1, 0.2 * (1.0 - k)))
 	_draw_river()
-	_draw_forest_wall()
 	for z in FARM.ZONES:
 		_draw_fence(z)
 	_draw_fence(GARDEN_RECT)
 	_draw_greenhouse()
 	_draw_path()
-	draw_texture_rect(TEX_HOUSE, Rect2(-784, -594, 248, 184), false)
-	draw_texture_rect(TEX_STALL, Rect2(STALL_RECT.position, STALL_RECT.size), false)
-	# 商店招牌
+	# 商店招牌（立柱部分随地面层；文字与货摊一起走 Y 排序由 _draw 之外的精灵承担）
 	var sign_rect := Rect2(STALL_RECT.get_center().x - 90, STALL_RECT.position.y - 68, 180, 26)
 	draw_texture_rect(TEX_SIGN, sign_rect, false)
 	draw_string_outline(sign_font, Vector2(sign_rect.position.x, sign_rect.position.y + 19),
@@ -738,22 +869,3 @@ func _draw_fence(r: Rect2) -> void:
 func _draw_path() -> void:
 	for s in _stones:
 		draw_texture_rect(TEX_STONE, Rect2(s.x - 8, s.y - 5, 16, 10), false)
-
-
-## 地图四周的森林树墙（纯绘制，实际阻挡靠边界碰撞矩形）
-func _draw_forest_wall() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 4242
-	var i := 0
-	for x in range(-2544, 2545, 52):
-		_wall_tree(Vector2(x + rng.randf_range(-9, 9), -1348 + rng.randf_range(-7, 7)), i)
-		_wall_tree(Vector2(x + rng.randf_range(-9, 9), 1348 + rng.randf_range(-7, 7)), i + 1)
-		i += 2
-	for y in range(-1344, 1345, 52):
-		_wall_tree(Vector2(-2560 + rng.randf_range(-7, 7), y + rng.randf_range(-9, 9)), i)
-		_wall_tree(Vector2(2560 + rng.randf_range(-7, 7), y + rng.randf_range(-9, 9)), i + 1)
-		i += 2
-
-
-func _wall_tree(p: Vector2, i: int) -> void:
-	draw_texture_rect(TEX_PINE if i % 2 == 1 else TEX_TREE, Rect2(p.x - 32, p.y - 48, 64, 96), false)
