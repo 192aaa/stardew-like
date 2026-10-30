@@ -210,7 +210,7 @@ func _blocked() -> bool:
 			or main.orders_open or main.bundles_open or main.shop_open or main.craft_open \
 			or main.cook_open or main.gift_open or main.dialog_open \
 			or main.goals_open or main.build_open \
-			or main.storage_open or main.mine_ui_open \
+			or main.storage_open \
 			or main._boot_panel != null
 
 

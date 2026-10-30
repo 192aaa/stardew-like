@@ -41,6 +41,7 @@ const LivestockScript := preload("res://scripts/livestock.gd")
 const MineScript := preload("res://scripts/mine.gd")
 const PetScript := preload("res://scripts/pet.gd")
 const WorldChunksScript := preload("res://scripts/world_chunks.gd")
+const MineWorldScript := preload("res://scripts/mine_world.gd")
 
 ## 节日活动：每 7 天一次，两类交替（当日达标睡前结算奖励）
 const FESTS := {
@@ -130,10 +131,10 @@ const BUILD_SLOTS := [
 	Vector2(-486, -372), Vector2(-396, -372),
 	Vector2(-306, -372), Vector2(-216, -372),
 ]
-## 矿洞界面：每层 7×5 块矿岩，每敲一块消耗 6 体力
-const MINE_COLS := 7
-const MINE_ROWS := 5
-const MINE_COST := 6.0
+## 矿洞场景：每挥一镐消耗 4 体力，挖够六成矿岩梯子出现
+const MINE_HIT_COST := 4.0
+## 矿洞场景在世界的远处（与农场互不干扰），进出矿洞只切换显示与传送
+const MINE_WORLD_POS := Vector2(6400, 0)
 
 var current_tool: int = Tool.HOE
 var time_min := float(DAY_START_MIN)
@@ -231,18 +232,16 @@ var _storage_dim: ColorRect
 var _storage_list: VBoxContainer
 var _storage_cap: Label
 
-## 矿洞界面（进矿洞后）：逐层 7×5 矿岩
-var mine_ui_open := false
-var _mine_panel: PanelContainer
-var _mine_dim: ColorRect
-var _mine_grid: GridContainer
-var _mine_btns: Array = []
-var _mine_cells: Array = []      # {ore, done}，长度 MINE_COLS*MINE_ROWS
-var _mine_layer := 0             # 当前深度（1 起，不存档）
-var _mine_title: Label
-var _mine_stam: Label
-var _mine_info: Label
-var _mine_next_btn: Button
+## 矿洞场景（另一个世界）：进矿洞入口后玩家被传送到地下洞穴，地面世界整体隐藏
+var mine_world: Node2D
+var in_mine := false
+var _mine_depth := 0
+## 进洞前站在地面的位置：出洞时回到这里；在洞里存档也记这个位置
+var _mine_return_pos := Vector2.ZERO
+## 地面世界各节点的可见性快照（进洞时隐藏、出洞时原样恢复）
+var _farm_vis_state := {}
+## 本层梯子出现提示只弹一次
+var _mine_ladder_told := false
 
 # 钓鱼状态机：0 无 / 1 等待咬钩 / 2 咬钩窗口 / 3 搏鱼小游戏
 var fish_state := 0
@@ -405,6 +404,12 @@ func _ready() -> void:
 	add_child(mine)
 	chunks = WorldChunksScript.new()
 	add_child(chunks)
+	# 矿洞场景（另一个世界）：放在世界远处，平时隐藏，进矿洞入口才显示
+	mine_world = MineWorldScript.new()
+	mine_world.position = MINE_WORLD_POS
+	mine_world.visible = false
+	mine_world.process_mode = Node.PROCESS_MODE_DISABLED
+	add_child(mine_world)
 	_bobber = Sprite2D.new()
 	_bobber.texture = TEX_BOBBER
 	_bobber.visible = false
@@ -488,6 +493,9 @@ func _process(delta: float) -> void:
 		canvas_mod.color = canvas_mod.color.lerp(Color(0.62, 0.68, 0.8), 0.4)
 	elif weather == "snow":
 		canvas_mod.color = canvas_mod.color.lerp(Color(0.76, 0.82, 0.94), 0.35)
+	# 洞里永远是暗色，洞外按天色（进出矿洞靠这个色调一眼区分）
+	if in_mine:
+		canvas_mod.color = Color(0.34, 0.32, 0.40)
 	# 暖阳叠加随天色衰减：正午最暖，入夜自动消失
 	if sun_grade != null and sun_grade.material != null:
 		var day_lum := canvas_mod.color.get_luminance()
@@ -500,7 +508,9 @@ func _process(delta: float) -> void:
 		_shadow.position = _shadow.position.lerp(_shadow_tp, clampf(delta * 12.0, 0.0, 1.0))
 	_update_target()
 	_update_hint()
-	chunks.update_around(player.position)
+	# 洞里不用外围区块地形（矿洞场景是独立的一张图）
+	if not in_mine:
+		chunks.update_around(player.position)
 	# 七日目标每秒校验一次（统计口径来自累计计数，跨联机 guest 不参与结算）
 	_goal_t += delta
 	if _goal_t >= 1.0:
@@ -550,7 +560,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("bag"):
 		if bag_open:
 			_toggle_bag(false)
-		elif not _panels_blocking() and not (_boot_panel != null and _boot_panel.visible):
+		elif (not _panels_blocking() or (in_mine and not sleeping)) \
+				and not (_boot_panel != null and _boot_panel.visible):
 			_toggle_bag(true)  # 标题页/其它面板打开时按 I 不弹背包
 	elif event.is_action_pressed("codex"):
 		_toggle_dex(not dex_open)
@@ -572,11 +583,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("build"):
 		if storage_open:
 			_toggle_storage(false)
-		elif mine_ui_open:
-			_toggle_mine_ui(false)
 		elif build_open:
 			_toggle_build(false)
-		elif not _panels_blocking() and place_mode == "":
+		elif not _panels_blocking() and place_mode == "" and not in_mine:
 			_toggle_build(true)
 	elif event.is_action_pressed("help"):
 		_toggle_help(not help_open)
@@ -616,7 +625,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if bag_open:
 			return
-		if build_open or storage_open or mine_ui_open:
+		if build_open or storage_open:
 			return
 		if help_open:
 			_toggle_help(false)
@@ -657,8 +666,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_build(false)
 		elif storage_open:
 			_toggle_storage(false)
-		elif mine_ui_open:
-			_toggle_mine_ui(false)
 		elif bag_open:
 			_toggle_bag(false)
 		elif _daily_open:
@@ -694,8 +701,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			and not orders_open and not dex_open and place_mode == "" \
 			and not cook_open and not gift_open and not settings_open \
 			and not bundles_open and not _daily_open and not goals_open \
-			and not bag_open and not build_open and not storage_open \
-			and not mine_ui_open:
+			and not bag_open and not build_open and not storage_open:
 		_use_tool()
 
 
@@ -705,6 +711,10 @@ func _unhandled_input(event: InputEvent) -> void:
 ## 联机时 guest 的突变动作改为发意图，由 host 执行后回推全量
 func _interact_chain() -> void:
 	if bag_open or build_open:
+		return
+	# 在矿洞场景里：E 只处理「入口梯子回地面」与「层间梯子下潜」
+	if in_mine:
+		_mine_interact()
 		return
 	if help_open:
 		_toggle_help(false)
@@ -768,7 +778,7 @@ func _interact_chain() -> void:
 					d = {"cx": m.cell.x, "cy": m.cell.y}})
 		else:
 			_machine_interact(m)
-	# 建筑门口按 E：小屋进仓库界面，矿洞入口进矿洞界面（都是独立全屏界面）
+	# 建筑门口按 E：小屋进仓库界面，矿洞入口进另一个场景（地下矿洞）
 	elif _near_building() != null:
 		_enter_building(_near_building())
 	# 宠物放在链尾：附近没有村民/野莓/货摊/机器等可交互对象时，才摸宠物或安放
@@ -831,6 +841,10 @@ func _area_cells(center: Vector2i, level: int) -> Array:
 
 
 func _use_tool() -> void:
+	# 在矿洞场景里：任何工具都当镐用（敲前方的矿岩）
+	if in_mine:
+		_mine_swing()
+		return
 	if Net.is_guest() and current_tool != Tool.ROD:
 		# 联机：guest 的工具动作发意图由 host 结算（鱼竿小游戏本地自打）
 		Net.send({t = "intent", k = "tool", d = {
@@ -1331,6 +1345,8 @@ func _save_payload() -> Dictionary:
 	var orders: Array = []
 	for o in _orders:
 		orders.append([o.kind, o.item, o.n, o.gold, o.who, int(o.done)])
+	# 在矿洞里存档：位置记成洞口（读档总是回到地面农场）
+	var save_pos: Vector2 = _mine_return_pos if in_mine else player.position
 	return {
 		"day": Game.day, "gold": Game.gold, "hero_id": Game.hero_id,
 		"saved_at": int(Time.get_unix_time_from_system()),
@@ -1339,7 +1355,7 @@ func _save_payload() -> Dictionary:
 		"hoe_level": Game.hoe_level, "can_level": Game.can_level,
 		"friends": Game.friends, "weather": weather,
 		"time_min": time_min, "tool": current_tool,
-		"px": player.position.x, "py": player.position.y,
+		"px": save_pos.x, "py": save_pos.y,
 		"tiles": tiles, "sprinklers": sprink, "sprinklers2": sprink2,
 		"scarecrows": scare, "machines": mach,
 		"xp": Game.xp, "skill_lv": Game.skill_lv,
@@ -1552,6 +1568,9 @@ func _do_load(with_toast := true) -> bool:
 			_toast("存档数据损坏了")
 		return false
 	_apply_payload(parsed)
+	# 读档总是回到地面（存档里矿洞位置已记成洞口坐标）
+	if in_mine:
+		_leave_mine(true, false)
 	# 清理残留的界面与钓鱼状态
 	if shop_open:
 		_toggle_shop(false)
@@ -1590,6 +1609,9 @@ func _refresh_festival() -> void:
 func _do_sleep(passed_out: bool) -> void:
 	if sleeping or Net.is_guest():
 		return
+	# 睡在矿洞里（含 24 点昏睡）：先回到地面，再按农场流程过夜
+	if in_mine:
+		_leave_mine(true, false)
 	sleeping = true
 	_close_panels()
 	if fish_state > 0:
@@ -1696,7 +1718,7 @@ func _panels_blocking() -> bool:
 	return sleeping or settings_open or help_open or dex_open or bundles_open \
 			or orders_open or craft_open or cook_open or gift_open or dialog_open \
 			or shop_open or _daily_open or goals_open or bag_open or _tel_panel != null \
-			or build_open or storage_open or mine_ui_open
+			or build_open or storage_open or in_mine
 
 
 ## 一键收获：收下范围内成熟作物（默认玩家附近 3×3，G 可切全田；每株 1 体力）
@@ -2558,14 +2580,14 @@ func _near_building() -> Variant:
 	return null
 
 
-## 门口按 E：小屋 → 仓库界面，矿洞入口 → 矿洞界面
+## 门口按 E：小屋 → 仓库界面，矿洞入口 → 传送到矿洞场景（另一个世界）
 func _enter_building(b: Dictionary) -> void:
 	Sfx.play("talk")
 	player.pop()
 	if String(b.kind) == "storehouse":
 		_toggle_storage(true)
 	else:
-		_toggle_mine_ui(true)
+		_enter_mine()
 
 
 ## 程序化画建筑贴图（28×24，2 倍最近邻放大）
@@ -2765,64 +2787,6 @@ func _build_structures_ui() -> void:
 	leave.pressed.connect(func() -> void: _toggle_storage(false))
 	sfoot.add_child(leave)
 
-	# ---- 矿洞界面 ----
-	var mm := _make_modal(720.0, 520.0)
-	_mine_dim = mm[0]
-	_mine_panel = mm[1]
-	var mvb := VBoxContainer.new()
-	mvb.add_theme_constant_override("separation", 8)
-	_mine_panel.add_child(mvb)
-	var mtop := HBoxContainer.new()
-	mtop.add_theme_constant_override("separation", 10)
-	mvb.add_child(mtop)
-	_mine_title = _mk_label("矿洞 · 第 1 层", 20)
-	_mine_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mtop.add_child(_mine_title)
-	_mine_stam = _mk_label("", 14)
-	_mine_stam.add_theme_color_override("font_color", Color(0.72, 0.94, 0.7))
-	mtop.add_child(_mine_stam)
-	var mclose := _mk_btn("×")
-	mclose.custom_minimum_size = Vector2(34, 30)
-	mclose.pressed.connect(func() -> void: _toggle_mine_ui(false))
-	mtop.add_child(mclose)
-	_mine_info = _mk_label("", 13)
-	mvb.add_child(_mine_info)
-	_mine_grid = GridContainer.new()
-	_mine_grid.columns = MINE_COLS
-	_mine_grid.add_theme_constant_override("h_separation", 6)
-	_mine_grid.add_theme_constant_override("v_separation", 6)
-	mvb.add_child(_mine_grid)
-	for i in MINE_COLS * MINE_ROWS:
-		var rb := _mk_btn("岩")
-		rb.custom_minimum_size = Vector2(86, 62)
-		rb.add_theme_font_size_override("font_size", 17)
-		var rsb := StyleBoxFlat.new()
-		rsb.bg_color = Color(0.2, 0.22, 0.26, 0.96)
-		rsb.border_color = Color(0.44, 0.48, 0.54, 0.9)
-		rsb.set_border_width_all(1)
-		rsb.set_corner_radius_all(6)
-		rb.add_theme_stylebox_override("normal", rsb)
-		var rhot := rsb.duplicate()
-		rhot.bg_color = Color(0.29, 0.32, 0.37, 0.98)
-		rb.add_theme_stylebox_override("hover", rhot)
-		rb.add_theme_stylebox_override("pressed", rhot)
-		rb.pressed.connect(_mine_strike.bind(i))
-		_mine_grid.add_child(rb)
-		_mine_btns.append(rb)
-	var mfoot := HBoxContainer.new()
-	mfoot.add_theme_constant_override("separation", 10)
-	mfoot.alignment = BoxContainer.ALIGNMENT_END
-	mvb.add_child(mfoot)
-	_mine_next_btn = _mk_btn("下一层（梯子）")
-	_mine_next_btn.custom_minimum_size = Vector2(170, 34)
-	_mine_next_btn.pressed.connect(_mine_next_layer)
-	mfoot.add_child(_mine_next_btn)
-	var mleave := _mk_btn("离开矿洞（返回农场）")
-	mleave.custom_minimum_size = Vector2(190, 34)
-	mleave.pressed.connect(func() -> void: _toggle_mine_ui(false))
-	mfoot.add_child(mleave)
-	mvb.add_child(_mk_label("敲矿岩每块 6 体力；挖空本层后梯子出现，越深越容易挖到宝石", 12))
-
 
 ## 打开/关闭建造面板
 func _toggle_build(open: bool) -> void:
@@ -2978,123 +2942,127 @@ func _storage_take(id: String) -> void:
 	_refresh_storage()
 
 
-## 打开/关闭矿洞界面（每次进洞都从第 1 层开始）
-func _toggle_mine_ui(open: bool) -> void:
-	if mine_ui_open == open:
+# ---------- 矿洞场景（另一个世界） ----------
+
+## 进矿洞入口：隐藏地面世界，把玩家传送到地下洞穴第 1 层
+func _enter_mine() -> void:
+	if in_mine:
 		return
-	mine_ui_open = open
-	_mine_panel.visible = open
-	_mine_dim.visible = open
-	_modal_freeze(open)
-	if open:
-		_mine_layer = 0
-		_mine_new_layer()
-		_toast("进了矿洞第 1 层：点矿岩敲碎它（每块 6 体力）")
-
-
-## 生成新一层矿岩：越深铜/铁与宝石越多
-func _mine_new_layer() -> void:
-	_mine_layer += 1
-	_mine_cells.clear()
-	var gem_c: float = clampf(float(_mine_layer - 2) * 0.06, 0.0, 0.24)
-	var iron_c: float = clampf(0.10 + float(_mine_layer) * 0.03, 0.10, 0.34)
-	for i in MINE_COLS * MINE_ROWS:
-		var r := randf()
-		var ore := "stone"
-		if r < gem_c:
-			ore = "gem"
-		elif r < gem_c + iron_c:
-			ore = "iron"
-		elif r < gem_c + iron_c + 0.22:
-			ore = "copper"
-		_mine_cells.append({"ore": ore, "done": false})
-	_refresh_mine()
-
-
-func _mine_left() -> int:
-	var n := 0
-	for c in _mine_cells:
-		if not bool(c.done):
-			n += 1
-	return n
-
-
-func _refresh_mine() -> void:
-	if _mine_grid == null:
-		return
-	_mine_title.text = "矿洞 · 第 %d 层" % _mine_layer
-	_mine_stam.text = "体力 %d/%d" % [int(Game.stamina), int(Game.max_stamina)]
-	var left := _mine_left()
-	for i in _mine_cells.size():
-		var c: Dictionary = _mine_cells[i]
-		var b: Button = _mine_btns[i]
-		if bool(c.done):
-			b.text = "空"
-			b.disabled = true
-			b.modulate = Color(1, 1, 1, 0.28)
-		else:
-			b.text = _mine_symbol(String(c.ore))
-			b.disabled = false
-			b.modulate = Color(1, 1, 1, 1)
-			b.add_theme_color_override("font_color", _mine_color(String(c.ore)))
-	_mine_info.text = "本层还剩 %d 块矿岩%s" % [left,
-				"　挖空了！按「下一层」继续深入" if left == 0 else ""]
-	_mine_next_btn.disabled = left > 0 or _mine_cells.is_empty()
-
-
-## 点一块矿岩：花 6 体力敲碎，产物进背包
-func _mine_strike(i: int) -> void:
-	if i < 0 or i >= _mine_cells.size():
-		return
-	var c: Dictionary = _mine_cells[i]
-	if bool(c.done):
-		return
-	if not Game.use_stamina(MINE_COST):
-		_toast("体力不够了：回去睡觉或吃点料理再来挖")
-		return
-	var ore := String(c.ore)
-	var n := 1
-	if ore == "stone":
-		n = randi_range(1, 2)
-	n += Game.ore_bonus()
-	Game.add_item(ore, n)
-	Game.add_xp("gather", 3)
-	c["done"] = true
+	_close_panels()
+	in_mine = true
+	_mine_depth = 1
+	_mine_ladder_told = false
+	_mine_return_pos = player.position
+	_set_farm_visible(false)
+	mine_world.process_mode = Node.PROCESS_MODE_INHERIT
+	mine_world.visible = true
+	mine_world.generate(1)
+	player.position = mine_world.spawn_global()
+	var cam: Camera2D = player.get_node("Camera")
+	cam.reset_smoothing()
+	if _minimap != null:
+		_minimap.visible = false
 	Sfx.play("pick")
-	_toast("敲出 %s x%d（-6 体力）" % [_item_name(ore), n])
-	_refresh_mine()
+	_toast("进了矿洞第 1 层：8 斧镐敲矿岩，挖够六成梯子出现，走到梯子按 E 下一层")
 
 
-func _mine_next_layer() -> void:
-	if _mine_cells.is_empty() or _mine_left() > 0:
-		_toast("先把本层矿岩挖空，梯子才会出现")
+## 出矿洞：恢复地面世界并回到洞口
+func _leave_mine(restore_world := true, back_to_door := true) -> void:
+	if not in_mine:
 		return
-	_mine_new_layer()
-	_toast("下到第 %d 层：越深铜/铁矿与宝石越多" % _mine_layer)
+	in_mine = false
+	mine_world.visible = false
+	mine_world.process_mode = Node.PROCESS_MODE_DISABLED
+	if restore_world:
+		_set_farm_visible(true)
+	if _minimap != null:
+		_minimap.visible = true
+	if back_to_door:
+		player.position = _mine_return_pos + Vector2(0, 26)
+		var cam: Camera2D = player.get_node("Camera")
+		cam.reset_smoothing()
+		chunks.update_around(player.position, true)
+		_toast("顺着入口梯子爬回了地面农场")
 
 
-func _mine_symbol(ore: String) -> String:
-	match ore:
-		"stone":
-			return "岩"
-		"copper":
-			return "铜"
-		"iron":
-			return "铁"
-		"gem":
-			return "宝"
-	return "?"
+## 隐藏 / 恢复地面世界（只切可见性，节点状态与存档都不动）
+func _set_farm_visible(on: bool) -> void:
+	if not on:
+		_farm_vis_state.clear()
+		for c in get_children():
+			if c == player or c == mine_world or c is CanvasLayer:
+				continue
+			if c is CanvasItem:
+				_farm_vis_state[c] = c.visible
+				c.visible = false
+	else:
+		for c in _farm_vis_state:
+			if is_instance_valid(c):
+				c.visible = bool(_farm_vis_state[c])
+		_farm_vis_state.clear()
 
 
-func _mine_color(ore: String) -> Color:
-	match ore:
-		"copper":
-			return Color(0.98, 0.62, 0.35)
-		"iron":
-			return Color(0.76, 0.86, 0.96)
-		"gem":
-			return Color(0.88, 0.58, 0.98)
-	return Color(0.74, 0.72, 0.68)
+## 洞里按 E：入口梯子回地面 / 层间梯子下一层
+func _mine_interact() -> void:
+	if mine_world.near_exit(player.position):
+		_leave_mine()
+		return
+	if mine_world.near_ladder(player.position):
+		_mine_depth += 1
+		_mine_ladder_told = false
+		mine_world.generate(_mine_depth)
+		player.position = mine_world.spawn_global()
+		var cam: Camera2D = player.get_node("Camera")
+		cam.reset_smoothing()
+		Sfx.play("pick")
+		_toast("下到矿洞第 %d 层：越深矿岩越多，铜铁与宝石也更多" % _mine_depth)
+		return
+	if mine_world.ladder_ready:
+		_toast("梯子已经出现了：走到发光那块矿岩旁按 E 下一层")
+	else:
+		_toast("再挖掉一些矿岩（六成以上）梯子才会出现")
+
+
+## 洞里挥镐：敲前方的矿岩，每下 4 体力，碎掉进背包
+func _mine_swing() -> void:
+	var p: Vector2 = player.position + player.facing * 34.0
+	var idx: int = mine_world.rock_near(p, 62.0)
+	player.pop()
+	Sfx.play("axe")
+	if idx < 0:
+		_toast("走近矿岩再挥镐（切到 8 斧镐或用空格/左键）")
+		return
+	if not Game.use_stamina(MINE_HIT_COST):
+		_toast("体力不够了：回地面睡觉或吃点料理再来")
+		return
+	var res: Dictionary = mine_world.hit(idx)
+	if String(res.result) == "hit":
+		return
+	var id := String(res.ore)
+	var n := (1 if id == "gem" else 1 + (1 if randf() < 0.45 else 0)) + Game.ore_bonus()
+	Game.add_item(id, n)
+	Game.add_xp("gather", {"copper": 6, "iron": 8, "gem": 12, "stone": 2}[id])
+	Sfx.play("pick")
+	var nm: String = "石料" if id == "stone" else String(Game.MATERIALS[id].name)
+	var col: Color = {"copper": Color(0.95, 0.75, 0.4), "iron": Color(0.78, 0.86, 0.96),
+		"gem": Color(0.88, 0.58, 0.98)}.get(id, Color(0.85, 0.88, 0.95))
+	_float_text("+%d %s" % [n, nm], res.pos, col)
+	_toast("挖到%s x%d（-4 体力）" % [nm, n])
+	if mine_world.ladder_ready and not _mine_ladder_told:
+		_mine_ladder_told = true
+		_toast("挖穿了！这层出现了通向下一层的梯子")
+
+
+## 洞里顶部提示：敲岩 / 下梯子 / 回地面
+func _mine_hint() -> String:
+	if mine_world.near_exit(player.position):
+		return "按 E 顺着入口梯子爬回地面农场（挖到的东西都已进背包）"
+	if mine_world.near_ladder(player.position):
+		return "按 E 下到第 %d 层（越深矿岩越多、宝石越多）" % (_mine_depth + 1)
+	if mine_world.ladder_ready:
+		return "梯子已经出现：走到发光的那块矿岩旁按 E 下一层"
+	return "矿洞第 %d 层：8 斧镐敲前方矿岩（每下 4 体力），挖掉六成梯子出现 · 已挖 %d/%d" % [
+		_mine_depth, mine_world.done_count(), mine_world.rocks.size()]
 
 
 ## 附近的加工机；返回 {cell, data} 或 null
@@ -4555,7 +4523,8 @@ func _build_help() -> void:
 	])
 	_help_section(col_r, "建筑与矿洞（新增）", [
 		"V 打开建造面板：小屋仓库（1200g+木20）、矿洞入口（1500g+木30），造在农舍东侧 4 个建筑位",
-		"走到建筑门口按 E 进入独立界面：仓库里背包 ↔ 仓库存取（最多 8 种）；矿洞逐层挖矿，每块 6 体力",
+		"走到建筑门口按 E：小屋进仓库界面（背包 ↔ 仓库存取，最多 8 种）；矿洞入口直接进地下矿洞场景（另一张地图）",
+		"矿洞里 8 斧镐敲矿岩（每下 4 体力），挖掉六成梯子出现，走过去按 E 下一层；踩入口梯子按 E 回地面",
 	])
 	_help_section(col_r, "订单与养殖", [
 		"货摊旁任务板按 E 接订单：每天 3 张，交作物/鱼/材料得金币与好感",
@@ -5253,7 +5222,9 @@ func _refresh_hud() -> void:
 func _update_hint() -> void:
 	var txt: String
 	var touch: bool = _touch != null and bool(_touch._enabled)
-	if place_mode != "":
+	if in_mine:
+		txt = _mine_hint()
+	elif place_mode != "":
 		txt = "走到目标格子点「用」放置（「设置」=取消）" if touch \
 				else "移动到目标格子按空格放置（Esc 取消）"
 	elif _near_villager() != null:
@@ -5296,7 +5267,7 @@ func _update_hint() -> void:
 	elif _near_building() != null:
 		var nb: Dictionary = _near_building()
 		var nd: Dictionary = Game.BUILD_DEFS[nb.kind]
-		txt = "按 E 进入%s%s" % [nd.name, "（仓库界面）" if nb.kind == "storehouse" else "（矿洞界面）"]
+		txt = "按 E 进入%s%s" % [nd.name, "（仓库界面）" if nb.kind == "storehouse" else "（矿洞场景）"]
 	elif gather.near_bush(player.position):
 		txt = "野莓熟了：按 E 采摘，第二天会再结果"
 	elif decor.near_water(player.position, 30.0):
@@ -5986,6 +5957,9 @@ func _first_empty_slot() -> int:
 ## 从零开始：清存档 + 全局状态复位 + 世界重建（当前 Game.hero_id 决定主角）
 func _start_new_game() -> void:
 	Save.write("")
+	# 新世界：如果此刻还在矿洞里，先回地面再重置
+	if in_mine:
+		_leave_mine(true, false)
 	Game.reset_state()
 	# 阿蓝被动：体力上限 +20（reset_state 已回到 100）
 	if Game.hero_kind() == "stamina":
