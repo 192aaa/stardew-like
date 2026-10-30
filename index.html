@@ -1,0 +1,384 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+		<meta name="apple-mobile-web-app-capable" content="yes">
+		<meta name="mobile-web-app-capable" content="yes">
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+		<meta name="theme-color" content="#0d1410">
+		<title>星露谷Like</title>
+		<style>
+html, body, #canvas {
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+body {
+	color: #f3ecd8;
+	background-color: #0d1410;
+	overflow: hidden;
+	touch-action: none;
+}
+
+#canvas {
+	display: block;
+}
+
+#canvas:focus {
+	outline: none;
+}
+
+/* 加载遮罩：深色林地 + 像素网格 */
+#status, #status-splash, #status-progress {
+	position: absolute;
+	left: 0;
+	right: 0;
+}
+
+#status {
+	top: 0;
+	bottom: 0;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	background:
+		radial-gradient(circle at 50% 26%, #23361f 0%, #131b12 55%, #0a0f09 100%);
+	background-color: #242424;
+	visibility: hidden;
+	transition: opacity 0.45s ease;
+	z-index: 2;
+}
+
+#status.fading {
+	opacity: 0;
+}
+
+#status-splash {
+	display: none;
+}
+
+#loading-box {
+	width: min(84vw, 420px);
+	text-align: center;
+}
+
+#game-title {
+	font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+	font-size: clamp(26px, 6.4vw, 44px);
+	font-weight: 700;
+	letter-spacing: 0.18em;
+	margin: 0 0 6px 0;
+	color: #ffe9a8;
+	text-shadow: 0 3px 0 #6b4520, 0 0 22px rgba(255, 200, 90, 0.35);
+}
+
+#game-sub {
+	font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+	font-size: 13px;
+	letter-spacing: 0.12em;
+	color: #9db98a;
+	margin: 0 0 26px 0;
+}
+
+#bar-track {
+	position: relative;
+	height: 18px;
+	background: #0a0f09;
+	border: 2px solid #4c6a3a;
+	border-radius: 4px;
+	box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.7), 0 0 0 3px rgba(0, 0, 0, 0.35);
+	overflow: hidden;
+}
+
+#bar-fill {
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	width: 0%;
+	background:
+		repeating-linear-gradient(90deg, #a8d15c 0 8px, #8fbb46 8px 16px);
+	transition: width 0.25s linear;
+}
+
+#bar-info {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	margin-top: 8px;
+	font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+	font-size: 12px;
+	color: #8fa87c;
+	letter-spacing: 0.06em;
+}
+
+#pct-text {
+	color: #d8ecab;
+	font-size: 14px;
+}
+
+#tip-text {
+	margin-top: 24px;
+	min-height: 40px;
+	font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+	font-size: 13px;
+	line-height: 1.6;
+	color: #cfd8bd;
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+#foot-note {
+	margin-top: 18px;
+	font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+	font-size: 11px;
+	color: #6d8161;
+}
+
+#status-progress, #status-notice {
+	display: none;
+}
+
+#status-notice {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 50%;
+	transform: translateY(-50%);
+	background-color: #4a2f2f;
+	border-radius: 6px;
+	border: 1px solid #9b3943;
+	color: #e8dcdc;
+	font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+	font-size: 13px;
+	line-height: 1.5;
+	margin: 0 2rem;
+	overflow: hidden;
+	padding: 1rem;
+	text-align: center;
+	z-index: 3;
+	white-space: pre-line;
+}
+		</style>
+		<link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
+<link rel="apple-touch-icon" href="index.apple-touch-icon.png"/>
+
+	</head>
+	<body>
+		<canvas id="canvas">
+			Your browser does not support the canvas tag.
+		</canvas>
+
+		<noscript>
+			Your browser does not support JavaScript.
+		</noscript>
+
+		<div id="status">
+			<img id="status-splash" class="show-image--true fullsize--true use-filter--true" src="index.png" alt="">
+			<div id="loading-box">
+				<h1 id="game-title">星露小农场</h1>
+				<p id="game-sub">种地 · 钓鱼 · 牧场 · 联机</p>
+				<div id="bar-track"><div id="bar-fill"></div></div>
+				<div id="bar-info">
+					<span id="stage-text">正在下载引擎</span>
+					<span id="pct-text">0%</span>
+				</div>
+				<div id="tip-text">小提示：先锄地再播种，作物每天都要浇水。</div>
+				<div id="foot-note">首次加载约 10MB，之后浏览器有缓存会快很多</div>
+			</div>
+			<progress id="status-progress"></progress>
+			<div id="status-notice"></div>
+		</div>
+
+		<script src="index.js"></script>
+		<script>
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1161760,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_THREADS_ENABLED = false;
+
+// 引擎 wasm 压缩加载：GitHub Pages 不对 .wasm 做 gzip，直接下原始 37.7MB 会非常慢。
+// 这里拦截引擎对 index.wasm 的 fetch，改取预压好的 index.wasm.gz（约 9.6MB），
+// 用 DecompressionStream 流式解压后交给引擎；不支持流式解压的浏览器自动退回原始 wasm。
+// 同时给 index.pck 的请求带上「主包体积」作为版本号：GitHub Pages 的静态缓存会保留旧 pck，
+// 不换 URL 的话重新部署后玩家仍会加载到旧地图。
+(function () {
+	if (typeof window.fetch !== 'function') {
+		return;
+	}
+	const origFetch = window.fetch.bind(window);
+	const sizes = GODOT_CONFIG.fileSizes || {};
+	const origWasmSize = sizes['index.wasm'] || 0;
+	const pckVersion = sizes['index.pck'] || 0;
+	window.fetch = function (input, init) {
+		let url = '';
+		try {
+			url = typeof input === 'string' ? input : ((input && input.url) || '');
+		} catch (e) {
+			url = '';
+		}
+		if (/index\.pck(\?|$)/.test(url) && pckVersion > 0) {
+			const sep = url.indexOf('?') >= 0 ? '&' : '?';
+			return origFetch(url + sep + 'v=' + pckVersion, init);
+		}
+		if (!/index\.wasm(\?|$)/.test(url) || typeof DecompressionStream !== 'function') {
+			return origFetch(input, init);
+		}
+		return origFetch('index.wasm.gz', {cache: 'force-cache'}).then(function (resp) {
+			if (!resp.ok || !resp.body) {
+				return origFetch(input, init);
+			}
+			const headers = {'Content-Type': 'application/wasm'};
+			if (origWasmSize > 0) {
+				headers['Content-Length'] = String(origWasmSize);
+			}
+			return new Response(resp.body.pipeThrough(new DecompressionStream('gzip')),
+				{status: 200, headers: headers});
+		}).catch(function () {
+			return origFetch(input, init);
+		});
+	};
+}());
+
+const engine = new Engine(GODOT_CONFIG);
+
+(function () {
+	const TIPS = [
+		'小提示：先锄地再播种，作物每天都要浇水。',
+		'小提示：按住空格抬起绿条，罩住游动的鱼。',
+		'小提示：按 B 打开收集包，交作物换永久体力上限。',
+		'小提示：攒够 6000 金币可以在商店买温室，冬天也能种菜。',
+		'小提示：七天内完成阶段目标，白拿金币和种子。',
+		'小提示：夜里池塘边有萤火虫，路边的灯会亮起来。',
+	];
+	const statusOverlay = document.getElementById('status');
+	const statusProgress = document.getElementById('status-progress');
+	const statusNotice = document.getElementById('status-notice');
+	const barFill = document.getElementById('bar-fill');
+	const pctText = document.getElementById('pct-text');
+	const stageText = document.getElementById('stage-text');
+	const tipText = document.getElementById('tip-text');
+
+	let initializing = true;
+	let statusMode = '';
+	let tipIndex = 0;
+	const tipTimer = setInterval(function () {
+		tipIndex = (tipIndex + 1) % TIPS.length;
+		tipText.style.opacity = '0';
+		setTimeout(function () {
+			tipText.textContent = TIPS[tipIndex];
+			tipText.style.opacity = '1';
+		}, 220);
+	}, 4200);
+	tipText.style.transition = 'opacity 0.22s ease';
+
+	function setStatusMode(mode) {
+		if (statusMode === mode || !initializing) {
+			return;
+		}
+		if (mode === 'hidden') {
+			initializing = false;
+			clearInterval(tipTimer);
+			statusOverlay.classList.add('fading');
+			setTimeout(function () { statusOverlay.remove(); }, 480);
+			return;
+		}
+		statusOverlay.style.visibility = 'visible';
+		statusNotice.style.display = mode === 'notice' ? 'block' : 'none';
+		statusMode = mode;
+	}
+
+	function setStatusNotice(text) {
+		while (statusNotice.lastChild) {
+			statusNotice.removeChild(statusNotice.lastChild);
+		}
+		statusNotice.textContent = text;
+	}
+
+	function displayFailureNotice(err) {
+		console.error(err);
+		if (err instanceof Error) {
+			setStatusNotice(err.message);
+		} else if (typeof err === 'string') {
+			setStatusNotice(err);
+		} else {
+			setStatusNotice('启动失败，请刷新页面重试。');
+		}
+		setStatusMode('notice');
+		initializing = false;
+		if (statusOverlay) {
+			statusOverlay.style.visibility = 'visible';
+		}
+	}
+
+	const missing = Engine.getMissingFeatures({
+		threads: GODOT_THREADS_ENABLED,
+	});
+
+	if (missing.length !== 0) {
+		if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
+			let serviceWorkerRegistrationPromise;
+			try {
+				serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
+			} catch (err) {
+				serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
+			}
+			Promise.race([
+				serviceWorkerRegistrationPromise.then((registration) => {
+					if (registration != null) {
+						return Promise.reject(new Error('Service worker already exists.'));
+					}
+					return registration;
+				}).then(() => engine.installServiceWorker()),
+				new Promise((resolve) => {
+					setTimeout(() => resolve(), 2000);
+				}),
+			]).then(() => {
+				window.location.reload();
+			}).catch((err) => {
+				console.error('Error while registering service worker:', err);
+			});
+		} else {
+			const missingMsg = '当前浏览器缺少运行所需特性：\n' + missing.join('\n');
+			displayFailureNotice(missingMsg);
+		}
+	} else {
+		setStatusMode('progress');
+		let shownStage = 1;
+		// 手机首次点击画面时尝试进入真全屏：Android Chrome / iPad Safari 支持，
+		// iPhone 的 Safari 与微信内置浏览器不支持元素全屏，会自动静默跳过
+		if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
+			const fsTarget = document.documentElement;
+			window.addEventListener('pointerdown', function () {
+				if (!document.fullscreenElement && fsTarget.requestFullscreen) {
+					fsTarget.requestFullscreen({navigationUI: 'hide'}).catch(function () {});
+				}
+			}, {once: true});
+		}
+
+		engine.startGame({
+			'onProgress': function (current, total) {
+				if (current > 0 && total > 0) {
+					const ratio = Math.max(0, Math.min(1, current / total));
+					barFill.style.width = (ratio * 100).toFixed(1) + '%';
+					pctText.textContent = Math.round(ratio * 100) + '%';
+					// 粗略分阶段文案：<45% 下载引擎，<85% 解包资源，其余准备入场
+					const stage = ratio < 0.45 ? 1 : (ratio < 0.85 ? 2 : 3);
+					if (stage !== shownStage) {
+						shownStage = stage;
+						stageText.textContent = stage === 1 ? '正在下载引擎'
+							: (stage === 2 ? '正在解包资源' : '正在准备农场');
+					}
+				}
+				statusProgress.removeAttribute('value');
+				statusProgress.removeAttribute('max');
+			},
+		}).then(() => {
+			setStatusMode('hidden');
+		}, displayFailureNotice);
+	}
+}());
+		</script>
+	</body>
+</html>
+
