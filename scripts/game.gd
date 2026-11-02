@@ -35,6 +35,8 @@ const MATERIALS := {
 	"copper": {"name": "铜矿", "sell": 40},
 	"iron": {"name": "铁矿", "sell": 90},
 	"gem": {"name": "宝石", "sell": 250},
+	"gold": {"name": "金矿", "sell": 220},
+	"iridium": {"name": "铱矿", "sell": 600},
 	"copper_bar": {"name": "铜锭", "sell": 150},
 	"iron_bar": {"name": "铁锭", "sell": 320},
 	"milk": {"name": "牛奶", "sell": 240},
@@ -102,6 +104,14 @@ const GOLD_BAR_COST := 3
 ## 钓竿升级：金币 + 铜矿；收线更稳，稀有鱼权重翻倍
 const ROD_UP_COST := 1800
 const ROD_UP_ORE := 5
+
+## 镐头升级：决定能潜入的矿洞层数与每下挖掉的血量
+## 1 级可到第 4 层，2 级（铜镐）第 8 层且每下 -2，3 级（铁镐）第 12 层且每下 -3
+const PICK_UP_COST := 900
+const PICK_UP_ORE := 5
+const PICK_UP2_COST := 3000
+const PICK_UP2_BARS := 3
+const PICK_LIMITS := [4, 8, 12]
 
 ## 宠物：领养价（猫/狗各一只）
 const PET_COST := 500
@@ -218,7 +228,7 @@ var harvest := {"parsnip": 0, "potato": 0, "straw": 0, "pumpkin": 0, "corn": 0, 
 ## 背包：木材/石料/野莓/鱼/矿石/金属锭/奶毛/加工产品/料理
 var items := {
 	"wood": 0, "stone": 0, "berry": 0, "smelt": 0, "perch": 0, "trout": 0,
-	"copper": 0, "iron": 0, "gem": 0,
+	"copper": 0, "iron": 0, "gem": 0, "gold": 0, "iridium": 0,
 	"copper_bar": 0, "iron_bar": 0, "milk": 0, "wool": 0,
 	"mayo": 0, "jam": 0, "pickle": 0, "pie": 0, "cheese": 0,
 	"salad": 0, "soup": 0, "dessert": 0,
@@ -230,8 +240,19 @@ var friends := {"rosa": 0, "ben": 0}
 ## 体力与工具等级（2 = 铜，3x3 范围）
 var stamina := 100.0
 var max_stamina := 100.0
+## 生命值：只在矿洞里会被怪物撞掉，睡一觉回满
+var health := 100.0
+var max_health := 100.0
 var hoe_level := 1
 var can_level := 1
+## 镐头等级（1 木 / 2 铜 / 3 铁）：决定可下潜层数与每下挖掉的血量
+var pick_level := 1
+
+
+## 当前镐头能下到的最深层（1 级 4 层 / 2 级 8 层 / 3 级 12 层）
+func mine_depth_limit() -> int:
+	return int(PICK_LIMITS[clampi(pick_level, 1, 3) - 1])
+
 
 ## 技能经验与等级（farm 务农 / fish 钓鱼 / gather 采集）
 var xp := {"farm": 0, "fish": 0, "gather": 0}
@@ -507,7 +528,7 @@ func reset_state() -> void:
 	harvest = {"parsnip": 0, "potato": 0, "straw": 0, "pumpkin": 0, "corn": 0, "blue": 0}
 	items = {
 		"wood": 0, "stone": 0, "berry": 0, "smelt": 0, "perch": 0, "trout": 0,
-		"copper": 0, "iron": 0, "gem": 0,
+		"copper": 0, "iron": 0, "gem": 0, "gold": 0, "iridium": 0,
 		"copper_bar": 0, "iron_bar": 0, "milk": 0, "wool": 0,
 		"mayo": 0, "jam": 0, "pickle": 0, "pie": 0, "cheese": 0,
 		"salad": 0, "soup": 0, "dessert": 0,
@@ -515,8 +536,11 @@ func reset_state() -> void:
 	friends = {"rosa": 0, "ben": 0}
 	stamina = 100.0
 	max_stamina = 100.0
+	health = 100.0
+	max_health = 100.0
 	hoe_level = 1
 	can_level = 1
+	pick_level = 1
 	xp = {"farm": 0, "fish": 0, "gather": 0}
 	skill_lv = {"farm": 1, "fish": 1, "gather": 1}
 	caught_fish = {}

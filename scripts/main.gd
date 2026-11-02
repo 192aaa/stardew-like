@@ -205,6 +205,7 @@ var _wool_sprites: Array = []
 var _cow_btn: Button
 var _sheep_btn: Button
 var _rod_btn: Button
+var _pick_btn: Button
 
 # 矿洞 / 宠物 / 节日
 var mine: Node2D
@@ -242,6 +243,8 @@ var _mine_return_pos := Vector2.ZERO
 var _farm_vis_state := {}
 ## 本层梯子出现提示只弹一次
 var _mine_ladder_told := false
+## 被怪物撞后的短暂无敌（秒）
+var _mine_invuln := 0.0
 
 # 钓鱼状态机：0 无 / 1 等待咬钩 / 2 咬钩窗口 / 3 搏鱼小游戏
 var fish_state := 0
@@ -410,6 +413,7 @@ func _ready() -> void:
 	mine_world.visible = false
 	mine_world.process_mode = Node.PROCESS_MODE_DISABLED
 	add_child(mine_world)
+	mine_world.player_hurt.connect(_on_mine_hurt)
 	_bobber = Sprite2D.new()
 	_bobber.texture = TEX_BOBBER
 	_bobber.visible = false
@@ -496,6 +500,7 @@ func _process(delta: float) -> void:
 	# 洞里永远是暗色，洞外按天色（进出矿洞靠这个色调一眼区分）
 	if in_mine:
 		canvas_mod.color = Color(0.34, 0.32, 0.40)
+	_mine_invuln = maxf(0.0, _mine_invuln - delta)
 	# 暖阳叠加随天色衰减：正午最暖，入夜自动消失
 	if sun_grade != null and sun_grade.material != null:
 		var day_lum := canvas_mod.color.get_luminance()
@@ -1352,7 +1357,9 @@ func _save_payload() -> Dictionary:
 		"saved_at": int(Time.get_unix_time_from_system()),
 		"seeds": Game.seeds, "harvest": Game.harvest, "items": Game.items,
 		"stamina": Game.stamina, "max_stamina": Game.max_stamina,
+		"health": Game.health, "max_health": Game.max_health,
 		"hoe_level": Game.hoe_level, "can_level": Game.can_level,
+		"pick_level": Game.pick_level,
 		"friends": Game.friends, "weather": weather,
 		"time_min": time_min, "tool": current_tool,
 		"px": save_pos.x, "py": save_pos.y,
@@ -1416,6 +1423,9 @@ func _apply_payload(d: Dictionary) -> void:
 		Game.stamina += 20.0
 	Game.hoe_level = int(d.get("hoe_level", 1))
 	Game.can_level = int(d.get("can_level", 1))
+	Game.pick_level = clampi(int(d.get("pick_level", 1)), 1, 3)
+	Game.max_health = float(d.get("max_health", 100.0))
+	Game.health = clampf(float(d.get("health", Game.max_health)), 1.0, Game.max_health)
 	var friends_d: Dictionary = d.get("friends", {})
 	for k in Game.friends:
 		if friends_d.has(k):
@@ -1657,6 +1667,7 @@ func _do_sleep(passed_out: bool) -> void:
 	_gen_orders()
 	_goal_check()  # 新的一天：补发已达成的阶段目标
 	Game.stamina = Game.max_stamina
+	Game.health = Game.max_health
 	Game.state_changed.emit()
 	_talked_today.clear()
 	_petted_today.clear()
@@ -2219,6 +2230,16 @@ func _build_shop() -> void:
 	_rod_btn = _mk_btn("")
 	_rod_btn.pressed.connect(_upgrade_rod)
 	rod_row.add_child(_rod_btn)
+	# 镐头升级：决定能下到矿洞第几层，以及每下挖掉多少矿岩血量
+	var pick_row := HBoxContainer.new()
+	pick_row.add_theme_constant_override("separation", 8)
+	vb.add_child(pick_row)
+	var pick_l := _mk_label("镐头升级（铜镐下到 8 层、铁镐 12 层，每下伤害更高）", 14)
+	pick_l.custom_minimum_size = Vector2(300, 0)
+	pick_row.add_child(pick_l)
+	_pick_btn = _mk_btn("")
+	_pick_btn.pressed.connect(_upgrade_pick)
+	pick_row.add_child(_pick_btn)
 	# 宠物领养：猫/狗各一只
 	for pk in ["cat", "dog"]:
 		var p_row := HBoxContainer.new()
@@ -2747,7 +2768,7 @@ func _build_structures_ui() -> void:
 		row.add_child(btn)
 		_build_rows[id] = {"btn": btn, "cost": cost}
 	vb.add_child(_mk_label("小屋仓库：进门后把背包材料存着，最多存 8 种；矿洞挖到的东西也能存", 12))
-	vb.add_child(_mk_label("矿洞入口：进门后一层层往下挖，越深铜/铁/宝石越多（每块 6 体力）", 12))
+	vb.add_child(_mk_label("矿洞入口：进门后一层层往下挖，每镐 4 体力；深层有宝箱、怪物与金/铱矿", 12))
 	vb.add_child(_mk_label("按 V / Esc 关闭", 12))
 
 	# ---- 仓库界面 ----
@@ -2952,6 +2973,7 @@ func _enter_mine() -> void:
 	in_mine = true
 	_mine_depth = 1
 	_mine_ladder_told = false
+	_mine_invuln = 0.0
 	_mine_return_pos = player.position
 	_set_farm_visible(false)
 	mine_world.process_mode = Node.PROCESS_MODE_INHERIT
@@ -2963,7 +2985,7 @@ func _enter_mine() -> void:
 	if _minimap != null:
 		_minimap.visible = false
 	Sfx.play("pick")
-	_toast("进了矿洞第 1 层：8 斧镐敲矿岩，挖够六成梯子出现，走到梯子按 E 下一层")
+	_toast("进了矿洞第 1 层：敲矿岩（每下 4 体力），挖掉六成梯子出现；洞里怪物撞到会扣生命")
 
 
 ## 出矿洞：恢复地面世界并回到洞口
@@ -2971,6 +2993,7 @@ func _leave_mine(restore_world := true, back_to_door := true) -> void:
 	if not in_mine:
 		return
 	in_mine = false
+	_mine_invuln = 0.0
 	mine_world.visible = false
 	mine_world.process_mode = Node.PROCESS_MODE_DISABLED
 	if restore_world:
@@ -3002,20 +3025,44 @@ func _set_farm_visible(on: bool) -> void:
 		_farm_vis_state.clear()
 
 
-## 洞里按 E：入口梯子回地面 / 层间梯子下一层
+## 洞里按 E：入口梯子回地面 / 宝箱开箱 / 层间梯子下一层
 func _mine_interact() -> void:
 	if mine_world.near_exit(player.position):
 		_leave_mine()
 		return
+	if mine_world.near_chest(player.position):
+		var loot: Dictionary = mine_world.open_chest()
+		if loot.is_empty():
+			return
+		var item_id := String(loot.item)
+		var n := int(loot.n)
+		Game.add_gold(int(loot.gold))
+		Game.add_item(item_id, n)
+		Game.add_xp("gather", 6)
+		Sfx.play("coin")
+		_float_text("+%d 金币" % int(loot.gold), player.position + Vector2(0, -60),
+				Color(1, 0.86, 0.42))
+		_toast("打开矿洞宝箱：%d 金币 + %s x%d" % [int(loot.gold),
+			String(Game.MATERIALS[item_id].name), n])
+		return
 	if mine_world.near_ladder(player.position):
-		_mine_depth += 1
+		var nxt := _mine_depth + 1
+		var limit := Game.mine_depth_limit()
+		if nxt > limit:
+			# 更深层要更硬的镐：1 级 4 层 / 2 级 8 层 / 3 级 12 层
+			var need := "铜镐" if limit == 4 else "铁镐"
+			_toast("镐头不够硬：第 %d 层要换成%s（商店花金币升级镐头）" % [nxt, need])
+			return
+		_mine_depth = nxt
 		_mine_ladder_told = false
+		_mine_invuln = 1.2
 		mine_world.generate(_mine_depth)
 		player.position = mine_world.spawn_global()
 		var cam: Camera2D = player.get_node("Camera")
 		cam.reset_smoothing()
 		Sfx.play("pick")
-		_toast("下到矿洞第 %d 层：越深矿岩越多，铜铁与宝石也更多" % _mine_depth)
+		var extra := "，这层有宝箱" if mine_world.has_chest else ""
+		_toast("下到矿洞第 %d 层：矿岩更多、矿种更贵%s" % [_mine_depth, extra])
 		return
 	if mine_world.ladder_ready:
 		_toast("梯子已经出现了：走到发光那块矿岩旁按 E 下一层")
@@ -3023,46 +3070,94 @@ func _mine_interact() -> void:
 		_toast("再挖掉一些矿岩（六成以上）梯子才会出现")
 
 
-## 洞里挥镐：敲前方的矿岩，每下 4 体力，碎掉进背包
+## 洞里挥镐：先敲靠近的怪物，否则敲前方的矿岩；每下 4 体力
 func _mine_swing() -> void:
 	var p: Vector2 = player.position + player.facing * 34.0
-	var idx: int = mine_world.rock_near(p, 62.0)
+	var mon: int = mine_world.monster_near(p, 68.0)
 	player.pop()
 	Sfx.play("axe")
+	if mon >= 0:
+		if not Game.use_stamina(MINE_HIT_COST):
+			_toast("体力不够了：回地面睡觉或吃点料理再来")
+			return
+		var mr: Dictionary = mine_world.hit_monster(mon, Game.pick_level)
+		if bool(mr.get("killed", false)):
+			Game.add_xp("gather", 5)
+			_float_text("赶跑了！", mr.pos, Color(0.95, 0.72, 0.45))
+			_toast("一镐敲散了洞里的怪物（-4 体力）")
+		return
+	var idx: int = mine_world.rock_near(p, 62.0)
 	if idx < 0:
 		_toast("走近矿岩再挥镐（切到 8 斧镐或用空格/左键）")
 		return
 	if not Game.use_stamina(MINE_HIT_COST):
 		_toast("体力不够了：回地面睡觉或吃点料理再来")
 		return
-	var res: Dictionary = mine_world.hit(idx)
+	var res: Dictionary = mine_world.hit(idx, Game.pick_level)
 	if String(res.result) == "hit":
 		return
 	var id := String(res.ore)
-	var n := (1 if id == "gem" else 1 + (1 if randf() < 0.45 else 0)) + Game.ore_bonus()
+	var rare := id == "gem" or id == "gold" or id == "iridium"
+	var n := (1 if rare else 1 + (1 if randf() < 0.45 else 0)) + Game.ore_bonus()
 	Game.add_item(id, n)
-	Game.add_xp("gather", {"copper": 6, "iron": 8, "gem": 12, "stone": 2}[id])
+	Game.add_xp("gather", {"copper": 6, "iron": 8, "gem": 12,
+		"gold": 18, "iridium": 26, "stone": 2}[id])
 	Sfx.play("pick")
 	var nm: String = "石料" if id == "stone" else String(Game.MATERIALS[id].name)
 	var col: Color = {"copper": Color(0.95, 0.75, 0.4), "iron": Color(0.78, 0.86, 0.96),
-		"gem": Color(0.88, 0.58, 0.98)}.get(id, Color(0.85, 0.88, 0.95))
+		"gem": Color(0.88, 0.58, 0.98), "gold": Color(1.0, 0.86, 0.36),
+		"iridium": Color(0.72, 0.52, 0.98)}.get(id, Color(0.85, 0.88, 0.95))
 	_float_text("+%d %s" % [n, nm], res.pos, col)
-	_toast("挖到%s x%d（-4 体力）" % [nm, n])
+	if rare:
+		_toast("挖到稀有的%s x%d！（-4 体力）" % [nm, n])
+	else:
+		_toast("挖到%s x%d（-4 体力）" % [nm, n])
 	if mine_world.ladder_ready and not _mine_ladder_told:
 		_mine_ladder_told = true
 		_toast("挖穿了！这层出现了通向下一层的梯子")
 
 
-## 洞里顶部提示：敲岩 / 下梯子 / 回地面
+## 洞里顶部提示：生命 / 宝箱 / 梯子 / 回地面
 func _mine_hint() -> String:
+	var hp := "生命 %d/%d" % [int(Game.health), int(Game.max_health)]
 	if mine_world.near_exit(player.position):
-		return "按 E 顺着入口梯子爬回地面农场（挖到的东西都已进背包）"
+		return "%s · 按 E 顺着入口梯子爬回地面农场（挖到的东西都已进背包）" % hp
+	if mine_world.near_chest(player.position):
+		return "%s · 按 E 打开矿洞宝箱（金币 + 稀有矿）" % hp
 	if mine_world.near_ladder(player.position):
-		return "按 E 下到第 %d 层（越深矿岩越多、宝石越多）" % (_mine_depth + 1)
+		var nxt := _mine_depth + 1
+		if nxt > Game.mine_depth_limit():
+			return "%s · 第 %d 层要更硬的镐头（商店升级镐头）" % [hp, nxt]
+		return "%s · 按 E 下到第 %d 层（越深矿岩越多、矿种越贵）" % [hp, nxt]
 	if mine_world.ladder_ready:
-		return "梯子已经出现：走到发光的那块矿岩旁按 E 下一层"
-	return "矿洞第 %d 层：8 斧镐敲前方矿岩（每下 4 体力），挖掉六成梯子出现 · 已挖 %d/%d" % [
-		_mine_depth, mine_world.done_count(), mine_world.rocks.size()]
+		return "%s · 梯子已经出现：走到发光的那块矿岩旁按 E 下一层" % hp
+	return "%s · 矿洞第 %d 层：敲前方矿岩（每下 4 体力），挖掉六成梯子出现 · 已挖 %d/%d" % [
+		hp, _mine_depth, mine_world.done_count(), mine_world.rocks.size()]
+
+
+## 洞里被怪物撞到：扣生命并短暂无敌；生命归零就被抬回地面
+func _on_mine_hurt(dmg: int, pos: Vector2) -> void:
+	if not in_mine or _mine_invuln > 0.0:
+		return
+	_mine_invuln = 0.8
+	Game.health = maxf(0.0, Game.health - float(dmg))
+	Game.state_changed.emit()
+	_float_text("-%d 生命" % dmg, pos, Color(0.95, 0.32, 0.32))
+	if Game.health <= 0.0:
+		_mine_defeat()
+	else:
+		_toast("被怪物撞了一下：扣 %d 生命（生命 %d/%d）" % [
+			dmg, int(Game.health), int(Game.max_health)])
+
+
+## 生命归零：被抬回地面，损失一部分金币，生命恢复到四成（睡一觉回满）
+func _mine_defeat() -> void:
+	var lost: int = mini(Game.gold, maxi(100, int(float(Game.gold) * 0.1)))
+	Game.add_gold(-lost)
+	Game.health = Game.max_health * 0.4
+	Game.state_changed.emit()
+	_leave_mine()
+	_toast("你在矿洞里被撞倒了：被抬回地面，损失 %d 金币，生命只剩四成（睡一觉回满）" % lost)
 
 
 ## 附近的加工机；返回 {cell, data} 或 null
@@ -4306,6 +4401,39 @@ func _upgrade_rod() -> void:
 	_toast("鱼竿升级为铜钓竿！收线更稳，月光鱼/雨鱼/鱼王出现率翻倍")
 
 
+## 镐头升级：1→2 需要金币+铜矿，2→3 需要金币+铁锭
+func _upgrade_pick() -> void:
+	if Net.is_guest():
+		Net.send({t = "intent", k = "buy", d = {"id": "pick"}})
+		return
+	if Game.pick_level >= 3:
+		return
+	if Game.pick_level == 1:
+		if Game.gold < Game.PICK_UP_COST:
+			_toast("金币不足！")
+			return
+		if Game.items.get("copper", 0) < Game.PICK_UP_ORE:
+			_toast("铜矿不够！去矿洞敲 %d 块铜矿" % Game.PICK_UP_ORE)
+			return
+		Game.add_gold(-Game.PICK_UP_COST)
+		Game.add_item("copper", -Game.PICK_UP_ORE)
+		Game.pick_level = 2
+		Sfx.play("coin")
+		_toast("镐头升级为铜镐！能下到第 8 层，每下挖掉 2 点矿岩血量")
+		return
+	if Game.gold < Game.PICK_UP2_COST:
+		_toast("金币不足！")
+		return
+	if Game.items.get("iron_bar", 0) < Game.PICK_UP2_BARS:
+		_toast("铁锭不够！先造熔炉（C 制作）把铁矿熔成铁锭 x%d" % Game.PICK_UP2_BARS)
+		return
+	Game.add_gold(-Game.PICK_UP2_COST)
+	Game.add_item("iron_bar", -Game.PICK_UP2_BARS)
+	Game.pick_level = 3
+	Sfx.play("coin")
+	_toast("镐头升级为铁镐！能下到第 12 层，每下挖掉 3 点矿岩血量")
+
+
 func _collect_eggs() -> void:
 	if Game.eggs_ready <= 0:
 		if Game.chicken_count > 0:
@@ -4525,6 +4653,9 @@ func _build_help() -> void:
 		"V 打开建造面板：小屋仓库（1200g+木20）、矿洞入口（1500g+木30），造在农舍东侧 4 个建筑位",
 		"走到建筑门口按 E：小屋进仓库界面（背包 ↔ 仓库存取，最多 8 种）；矿洞入口直接进地下矿洞场景（另一张地图）",
 		"矿洞里 8 斧镐敲矿岩（每下 4 体力），挖掉六成梯子出现，走过去按 E 下一层；踩入口梯子按 E 回地面",
+		"洞里怪物（史莱姆/蝙蝠）靠近会撞人扣生命，用镐敲两下赶跑；生命归零会被抬回地面并损失金币",
+		"第 3/6/9/12 层有宝箱（金币 + 稀有矿）；第 4 层起有金矿，第 7 层起有铱矿",
+		"镐头决定能下几层：木镐 4 层、铜镐 8 层、铁镐 12 层，商店可升级，每级伤害更高",
 	])
 	_help_section(col_r, "订单与养殖", [
 		"货摊旁任务板按 E 接订单：每天 3 张，交作物/鱼/材料得金币与好感",
@@ -5174,6 +5305,10 @@ func _refresh_hud() -> void:
 	if _rod_btn:
 		_rod_btn.text = "铜钓竿 1800g+铜x5" if Game.rod_lv == 1 else "已满级"
 		_rod_btn.disabled = Game.rod_lv >= 2
+	if _pick_btn:
+		_pick_btn.text = "铜镐 900g+铜x5" if Game.pick_level == 1 else \
+				("铁镐 3000g+铁锭x3" if Game.pick_level == 2 else "已满级")
+		_pick_btn.disabled = Game.pick_level >= 3
 	# 温室建造按钮
 	if _gh_btn:
 		_gh_btn.text = "温室已建成" if Game.greenhouse_built \
@@ -5739,6 +5874,8 @@ func _apply_intent(k: String, d: Dictionary) -> void:
 				_upgrade(id)
 			elif id == "rod":
 				_upgrade_rod()
+			elif id == "pick":
+				_upgrade_pick()
 			elif id == "cat" or id == "dog":
 				_adopt_pet(id)
 			else:
@@ -6487,7 +6624,7 @@ const BAG_TABS := [
 	["all", "全部"], ["crop", "作物"], ["seed", "种子"],
 	["fish", "鱼"], ["ore", "矿石"], ["mat", "材料"], ["food", "料理"],
 ]
-const BAG_ORE_IDS := ["copper", "iron", "gem", "copper_bar", "iron_bar"]
+const BAG_ORE_IDS := ["copper", "iron", "gem", "gold", "iridium", "copper_bar", "iron_bar"]
 
 
 ## 背包面板：顶部金币与关闭、分类标签、六列物品格子（可滚动）、右侧详情与卖出
