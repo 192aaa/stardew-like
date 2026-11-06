@@ -5,7 +5,7 @@
 | 契约 | `spec.md` **v0.1.1**（已批准 2026-11-05；基线刷新，SHALL/AC/INV 未变） |
 | 红线 | `AGENTS.md`（R5 基线已同步） |
 | 基线 | `dcd502d`（2026-11-05，与 `origin/main` 一致） |
-| 当前闸门 | **T2.1 进行中（已放行；拆分范围/提交检查点待人类裁决）；其余阻塞** |
+| 当前闸门 | **T2.1 待验收（AC2~4 通过）；T2.1b 与其余阻塞** |
 
 > 基线注记：`spec.md` §2 与 `AGENTS.md` R5 已按人类授权于 2026-11-05 刷新至 `dcd502d`；`docs/AS-IS-baseline.md` 仍为 v0.1 制定时旧快照（无契约效力），本次未改。
 
@@ -33,7 +33,8 @@
 | T1.1 | C2 | 修 `aoe_toggle` 键位冲突 + 键位常量 + 文案漂移 | `project.godot`, `scripts/main.gd`, `scenes/main.tscn`, `scripts/touch_controls.gd` | C2-AC1~3 | T0.3 | **已验收（2026-11-05）** |
 | T1.2 | C3 | 存档载荷加 `v: 2` 与迁移分派 | `scripts/main.gd`, `scripts/save.gd` | C3-AC1~3 | T0.3 | **已验收（2026-11-05）** |
 | T1.3 | C4 | 建 `tests/run.gd` 与首批 6 条断言 | `tests/run.gd`, `README.md` | C4-AC1~3 | T1.2 | **已验收（2026-11-06，人类认可覆盖口径）** |
-| T2.1 | C5-① | 抽出 UI 面板控制器 | `scripts/main.gd` → `scripts/ui/` | C5-AC2~4 | T1.3 | **进行中（待范围/提交裁决，见记录 #13）** |
+| T2.1 | C5-① | 抽出 UI 面板控制器（低耦合先行） | `scripts/main.gd` → `scripts/ui/` | C5-AC2~4 | T1.3 | **待验收（见记录 #15）** |
+| T2.1b | C5-①b | 继续把剩余 UI 面板（商店/制作/背包/设置/图鉴/帮助/标题/选角等）迁入 `scripts/ui/panels.gd` | `scripts/main.gd`, `scripts/ui/panels.gd` | C5-AC2~4 | T2.1 | 阻塞 |
 | T2.2 | C5-② | 抽出钓鱼状态机，处理 `3: pass` | `scripts/main.gd` → `scripts/fishing.gd` | C5-AC2~4 | T2.1 | 阻塞 |
 | T2.3 | C5-③ | 抽出商店 / 制作建造 | `scripts/main.gd` → `scripts/shop.gd`, `scripts/craft.gd` | C5-AC2~4 | T2.2 | 阻塞 |
 | T2.4 | C5-④ | 抽出联机同步与能力表 | `scripts/main.gd` → `scripts/net_sync.gd` | C5-AC2~4 | T2.3 | 阻塞 |
@@ -60,6 +61,8 @@
 | 11 | T1.2 / T1.3 | 2026-11-05 | 人类裁决：**T1.2 验收通过，放行 T1.3** | T1.2 转「已验收」；T1.3 由「阻塞」转「进行中」 | 按 R0 逐任务放行 |
 | 12 | T1.3 | 2026-11-05 | 执行完成，待验收 | 见下方「T1.3 验收证据」：AC1/AC2/AC3 字面通过；SHALL 覆盖口径偏差已标注，待人类裁决 | 只改 2 个登记文件 `tests/run.gd`（新建）、`README.md`；未提交 |
 | 13 | T1.3 / T2.1 | 2026-11-06 | 人类裁决：**认可 C4 覆盖口径，T1.3 验收通过，放行 T2.1** | T1.3 转「已验收」；T2.1 转「进行中」。代理完成前置探索后按 R4 停下，待裁决拆分范围与提交检查点，见「T2.1 前置探索」 | 尚未改动任何游戏代码 |
+| 14 | T2.1 | 2026-11-06 | 人类裁决：**授权提交，低耦合先行，AC2 用等效方法**（方案 A） | 按 R2 显式授权 `git commit`；检查点 `cdf26bc`（9 文件 +709/−47）先固化 T1.1~T1.3；T2.1 只抽低耦合面板，剩余登记 T2.1b；AC2 改用静态解析 + 临时 autoload 探针 | 提交遇到 git 未配身份，改用进程级环境变量沿用 `dcd502d` 既有作者，未改 git config、未 push |
+| 15 | T2.1 | 2026-11-06 | 执行完成，待验收 | 见下方「T2.1 验收证据」 | 只改 2 个登记位置：`scripts/main.gd` + 新建 `scripts/ui/panels.gd` |
 
 ### 补跑证据（记录 #6）
 
@@ -164,6 +167,49 @@
 
 C5-AC1「`main.gd` ≤ 3000 行」是 5 步阶段终点（`docs/AS-IS-baseline.md:264`），本步不以此判定。
 
+### T2.1 验收证据（记录 #15）
+
+**改动范围（只碰登记位置）**：新建 `scripts/ui/panels.gd`（384 行）；`scripts/main.gd` 由检查点 `cdf26bc` 的 7058 行 → **6801 行**（`git diff --numstat` = `+32 / −290`）。行数统一按 `[System.IO.File]::ReadAllLines` 统计：此前证据里的 6872 / 6623 是 PowerShell `Get-Content` 在混合行尾文件上的少算值，按 .NET 口径更正后与 diff 净 −258 行自洽（与记录 #13 前置探索的「7060 行」属同一量级，差 2 为末尾空行计法）。未改玩法数值，`scripts/game.gd` / `scripts/save.gd` / `scenes/main.tscn` / `project.godot` 本步零改动。
+
+**做法（组合而非继承 · 低耦合先行）**：`main.gd:45` preload `PanelsScript`；`var panels`（无静态类型，便于动态派发）；`_ready()` 在 `_ui_font` 之后、全部 `_build_*` 之前 `panels.main = self; add_child(panels)`。搬走 **22 个函数实现**，`main.gd` 原位置保留**同名薄转发壳**（`main.gd` 内共 **22 处** `panels.*` 调用，其中 15 处 `return`、7 处 void 直调；`panels.gd` 另有 1 个内部辅助 `ui_root()`），因此 main 内 `_mk_label` 的 141 处、`_mk_btn` 的 60 处等调用点**零改动**。所有面板状态变量（`_save_*` / `_boot_*` / `*_open`）**全部留在 main**——`touch_controls.gd:216-223` 直接读 main 的 16 个 `*_open`，组合链不能断。
+
+搬入 `panels.gd` 的内容：UI 工厂（`mk_label` / `mk_btn` / `make_modal` / `modal_freeze`）、7 个样式函数、`key_cap`、存档日期/时间文案，以及世界存档选择页 10 个函数（开关 / 6 槽卡片 / 刷新 / 进入 / 新建 / 删除 / 关闭）。玩法写入（`_do_load` / `_boot_finish` / `_toast` / `_apply_season_tint` 等）仍留在 main，由 `panels` 显式 `main.<member>` 回调，未复制玩法逻辑。
+
+| AC | 结果 |
+| --- | --- |
+| **AC2（等效方法，经 #14 认可）** | **通过**。① 静态解析 `_save_payload()` return 字典键集合：拆分前 **64** → 拆分后 **64**，`identical=True`，含 `v`。② 临时 autoload 探针在真实主场景调 `_save_payload()`：运行时 **64 键、`v=2`**，排序后 CSV 与基线 **620 字符逐字相同**。③ 三个契约函数 `has_method("_save_payload"/"_apply_payload"/"_unhandled_input")` 均 `true`，函数本体未移动 |
+| **AC3** | **通过**：`scripts/ui/panels.gd` 文件头 `##` 写明职责、不持有状态的原因、22 个对外接口（`panels.gd:9-16` 逐项列出）、组合挂载方式与「不复制玩法数值」，风格与 `touch_controls.gd` 一致 |
+| **AC4 / INV-6（与改动相关的冒烟项）** | **通过**：见下方逐项 |
+| 运行验证 | 主场景 `--headless --quit-after 150` → `exit 0`，`_ready` 全程无 `SCRIPT ERROR`/解析/运行时错误（21 个 `_build_*` 全经转发壳执行）；C4 回归网 `RESULT cases=7 pass=24 fail=0`、`exit 0`；`read_lints` 0 诊断 |
+
+**冒烟逐项**：
+- **#1 桌面启动 / 标题页 6 槽**：headless 无错；探针 `_open_save_select()` → `list_children=6`，`_boot_info_text()` 返回「已有 1 个世界存档（共 6 个存档位）」✓
+- **#3 存读档**：C4 回归网 v1/v2 载荷往返 + `slot_summary` 读 `v`；探针 `_save_slot_card(0)` → `PanelContainer` 带 2 个按钮、`_delete_slot(0)` 首次仅置确认状态不删档、`_close_save_select()` 正确清空引用；`_save_payload` / `_apply_payload` / `_do_load` 未动 ✓
+- **#4 键位**：C4 回归网 39 个 keycode 无重复、X=88/G=71；探针 `_key_cap` = `X/G` ✓
+- **#2 / #5 / #6 / #7**（一天循环、钓鱼矿洞、Web、联机）：本步**未改动**对应代码路径，按 INV-6「与改动相关的条目」口径未重跑，**如实标注为未执行**，不推断通过
+
+**探针覆盖的其他转发链**：`make_modal` 返回 `[ColorRect, PanelContainer]`、`modal_freeze` 双向调用、7 个样式函数均返回 `StyleBoxFlat`、`mk_label`/`mk_btn` 文本正确、`slot_date_text({day:31})` = 「第 31 天 · 秋季第 3 天」、`fmt_time(0)` = 「—」、`main.panels` 实例已挂载。探针**不写任何用户存档**。
+
+**一次失败如实记录**：首轮探针命令里 `[System.IO.File]::ReadAllText` 用了相对路径（.NET 工作目录 ≠ PowerShell `cd` 目录），报 `FileNotFoundException`，且清理逻辑误删了探针文件；改用绝对路径并重建探针后成功，上述输出均来自重跑。**清理**：`project.godot` 已从备份还原（无 `ProbeT21`）、`scripts/_probe_t21.gd` 已删、无残留进程。
+
+**范围说明（对应方案 A）**：本步只抽低耦合部分，`main.gd` 仍 6801 行；剩余约 2500 余行面板函数（商店 / 制作 / 背包 / 设置 / 图鉴 / 帮助 / 标题 / 选角等）登记为 **T2.1b**，避免与 C5-③ 抢范围。C5-AC1「≤3000 行」是五步阶段终点，本步不判定。按 C5 SHALL「每步独立提交」及 #14 授权，T2.1 成果（含本 `plan.md` 的证据与状态）作为一次独立提交，提交完成后见 `git log`；提交号在交付说明中给出，不在文件内自引用。
+
+**收尾核对（记录 #15 补记）**：按本步收尾要求复核证据，更正三处计数偏差——行数统计口径统一为 `[System.IO.File]::ReadAllLines`（7058 → 6801）、转发壳/接口数由 21/23/24 统一更正为 22（`main.gd` 内 `panels.*` 调用 22 处：`Select-String` 实测 22；`panels.gd` 共 23 个 `func`，减去内部辅助 `ui_root()` 为 22 个对外接口）。原始证据文本按 R3 精神保留更正说明，未删除。
+
+**最终干净验证（收尾补跑）**：
+
+| 项 | 结果 |
+| --- | --- |
+| 主场景 headless | `Start-Process -Wait -PassThru` 在项目根执行 `--headless --path . --quit-after 150` → `exit=0`；`SCRIPT ERROR` / `Parse Error` / `Compile Error` / `Identifier not found` 命中 **0**。退出期 `1 resources still in use` / `2 ObjectDB instances leaked` 为 T0.3 起既有现象，非本步引入 |
+| C4 回归网 | 同法执行 `--headless --path . --script tests/run.gd` → `exit=0`、`RESULT  cases=7  pass=24  fail=0`，7 组 24 断言全 PASS、「5 号槽已还原」PASS |
+| 静态诊断 | `read_lints`（`scripts/main.gd` / `scripts/ui/panels.gd` / `SDD/plan.md`）= **0 诊断**；`git diff --check` 无空白错误（仅既有 CRLF 提示） |
+| 工作区 | `git status --short` = ` M SDD/plan.md`、` M scripts/main.gd`、`?? scripts/ui/`；`git diff --cached --numstat` 为空，无 staged 残留 |
+| 残留清理 | `project.godot` 无 `ProbeT21`、`scripts/_probe_t21.gd` 不存在、`scripts/ui/` 仅 `panels.gd`（无 `.uid` 产物）、Godot 进程 0 |
+| `%TEMP%` 日志 | 7 个 `t21_*` 日志保留在工作区外（清理命令被 Safe-Delete 拒绝，详见下方如实记录），不入仓库、不影响验收 |
+| 输出编码 | Godot 输出经 PowerShell 重定向读取时中文呈 GBK 乱码，属捕获侧编码，非产品问题；`RESULT` / `PASS` / 错误匹配行均为 ASCII 判定 |
+
+**一次失败如实记录（收尾验证命令本身，非产品代码）**：首轮用 `& $exe ... 2>&1` 直接捕获得到 `lines=0`、`exit=0`，文件重定向后日志 0 字节，`cmd /c` 变体返回 1 —— GUI 子系统进程未被 PowerShell 等待、且 `--script tests/run.gd` 相对路径未在项目根解析。按 R3 不把空输出当作通过证据，改用 `Start-Process -WorkingDirectory <项目根> -Wait -PassThru -RedirectStandardOutput / -RedirectStandardError`，才拿到上表的真实输出与退出码。临时日志写在 `%TEMP%`（工作区外、不入仓库）；收尾批量清理命令里 `t21_*.gd` 通配符无匹配，被 Safe-Delete 拒绝并提示不得重试或改写等价命令，按提示未再删除，7 个 `t21_*` 日志保留在 `%TEMP%`，如实标注。
+
 记录格式：`# | 任务ID | YYYY-MM-DD | 批准/驳回 | AC逐条结果 + 命令输出或路径:行号 | 备注`
 
 ## 4. 冒烟清单（每个任务按相关性执行）
@@ -195,15 +241,16 @@ C5-AC1「`main.gd` ≤ 3000 行」是 5 步阶段终点（`docs/AS-IS-baseline.m
 ```
 契约 spec.md      = v0.1.1（已批准，基线已刷新，SHALL/AC/INV 未变）
 红线 AGENTS.md    = R5 基线已同步
-基线              = dcd502d（35 次提交，与 origin/main 一致）
+基线              = dcd502d；检查点 cdf26bc（T1.1~T1.3 成果，2026-11-06）
 T0.0 ~ T0.3       = 已验收
 T1.1 ~ T1.2       = 已验收（2026-11-05）
 T1.3              = 已验收（2026-11-06，覆盖口径经人类认可）
-T2.1              = 进行中（待范围/提交裁决，未改游戏代码）
-其余全部           = 阻塞
-进行中任务         = T2.1
-未提交改动         = README.md、tests/run.gd（T1.3 新增）、SDD/plan.md、SDD/spec.md、SDD/AGENTS.md、
-                    project.godot、scenes/main.tscn、scripts/main.gd、scripts/touch_controls.gd
+T2.1              = 待验收（AC2~4 通过，见记录 #15）
+T2.1b             = 阻塞（新增：剩余 UI 面板迁移，依赖 T2.1 验收）
+T2.2 ~ T3.2       = 阻塞
+进行中任务         = 无（R0：T2.1 已停下待验收）
+未提交改动         = T2.1 成果按 C5 SHALL 单独提交：SDD/plan.md、scripts/main.gd、scripts/ui/panels.gd；
+                    提交完成后以 `git status --short` 为准应为空
 ```
 
-**当前等待**：T2.1 前置探索发现的三处冲突裁决（见「T2.1 前置探索与待裁决事项」）：是否按 R2 授权提交检查点、C5-AC2 验收方法是否允许等效替代、T2.1 拆分范围取 A/B/C 哪个方案。裁决前不改游戏代码。
+**当前等待**：T2.1 的人类验收裁决（证据见记录 #15）。记录 #13 的三处冲突已由记录 #14 裁决并执行完毕（授权提交 / 低耦合先行 / AC2 等效方法），检查点 `cdf26bc` 已建立。验收前不预做 T2.1b、T2.2 或任何后续任务（R0）；冒烟 #2/#5/#6/#7 已在证据中如实标注为未执行，不推断通过。

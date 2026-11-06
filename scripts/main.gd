@@ -42,6 +42,7 @@ const MineScript := preload("res://scripts/mine.gd")
 const PetScript := preload("res://scripts/pet.gd")
 const WorldChunksScript := preload("res://scripts/world_chunks.gd")
 const MineWorldScript := preload("res://scripts/mine_world.gd")
+const PanelsScript := preload("res://scripts/ui/panels.gd")
 
 ## 节日活动：每 7 天一次，两类交替（当日达标睡前结算奖励）
 const FESTS := {
@@ -135,6 +136,9 @@ const BUILD_SLOTS := [
 const MINE_HIT_COST := 4.0
 ## 矿洞场景在世界的远处（与农场互不干扰），进出矿洞只切换显示与传送
 const MINE_WORLD_POS := Vector2(6400, 0)
+
+## UI 面板控制器（组合挂载）：实现见 scripts/ui/panels.gd，本文件保留同名薄转发壳
+var panels
 
 var current_tool: int = Tool.HOE
 var time_min := float(DAY_START_MIN)
@@ -385,6 +389,10 @@ var _goals_labels: Array = []
 func _ready() -> void:
 	_ui_font = SystemFont.new()
 	_ui_font.font_names = PackedStringArray(["Microsoft YaHei", "SimHei", "SimSun"])
+	# UI 面板控制器：组合挂载，必须早于任何 _build_*（它们经转发壳调用 panels）
+	panels = PanelsScript.new()
+	panels.main = self
+	add_child(panels)
 	# 上次玩的世界存档槽：开局先读它，读档/存档都落在这个槽
 	Save.current = clampi(int(Save.setting("last_slot", 0)), 0, Save.SLOT_COUNT - 1)
 	Game.state_changed.connect(_refresh_hud)
@@ -2712,42 +2720,13 @@ func _sync_buildings() -> void:
 		_building_sprites.append(spr)
 
 
-## 全屏界面打开时停住主角移动（界面不暂停世界，天色照常走）
+## 以下 UI 构造已迁入 scripts/ui/panels.gd；保留同名薄转发壳，main 内调用点不变
 func _modal_freeze(on: bool) -> void:
-	if player != null:
-		player.set_physics_process(not on)
+	panels.modal_freeze(on)
 
 
-## 全屏遮罩 + 居中面板（建造 / 仓库 / 矿洞共用同一套样式）
 func _make_modal(w: float, h: float) -> Array:
-	var dim := ColorRect.new()
-	dim.color = Color(0.02, 0.03, 0.05, 0.62)
-	dim.mouse_filter = Control.MOUSE_FILTER_STOP
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	dim.process_mode = Node.PROCESS_MODE_ALWAYS
-	dim.visible = false
-	$UI.add_child(dim)
-	var panel := PanelContainer.new()
-	panel.anchor_left = 0.5
-	panel.anchor_top = 0.5
-	panel.anchor_right = 0.5
-	panel.anchor_bottom = 0.5
-	panel.offset_left = -w * 0.5
-	panel.offset_top = -h * 0.5
-	panel.offset_right = w * 0.5
-	panel.offset_bottom = h * 0.5
-	panel.add_theme_stylebox_override("panel", _modal_style())
-	panel.process_mode = Node.PROCESS_MODE_ALWAYS
-	panel.visible = false
-	$UI.add_child(panel)
-	# 遮罩与面板压到 UI 最上层：盖住小地图 / 目标条 / 物品栏，像个独立界面
-	# HUD 节点是 _ready 前面加进 $UI 的，光靠 move_child 压不住后来才加的小地图/目标条，
-	# 这里再给高 z_index，保证界面永远盖在 HUD 之上
-	dim.z_index = 900
-	panel.z_index = 901
-	$UI.move_child(dim, -1)
-	$UI.move_child(panel, -1)
-	return [dim, panel]
+	return panels.make_modal(w, h)
 
 
 ## 建三个界面的 UI：建造面板（V）+ 仓库界面 + 矿洞界面
@@ -4714,16 +4693,8 @@ func _help_section(vb: VBoxContainer, title: String, lines: Array) -> void:
 		vb.add_child(_mk_label(line, 13))
 
 
-## 从 InputMap 读取动作的首个键盘键帽文字：键位唯一真源是 project.godot，
-## 帮助面板据此生成说明，改键位时不必再改文案
 func _key_cap(action: String) -> String:
-	for e in InputMap.action_get_events(action):
-		if e is InputEventKey:
-			var kc: int = e.physical_keycode
-			if kc == 0:
-				kc = e.keycode
-			return OS.get_keycode_string(kc).trim_prefix("Key")
-	return "?"
+	return panels.key_cap(action)
 
 
 func _toggle_help(open: bool) -> void:
@@ -5527,22 +5498,11 @@ func _toast(msg: String) -> void:
 
 
 func _mk_label(txt: String, size: int) -> Label:
-	var l := Label.new()
-	l.text = txt
-	l.add_theme_font_override("font", _ui_font)
-	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_color", Color(1, 0.98, 0.92))
-	l.add_theme_color_override("font_outline_color", Color(0.1, 0.08, 0.06))
-	l.add_theme_constant_override("outline_size", 5)
-	return l
+	return panels.mk_label(txt, size)
 
 
 func _mk_btn(txt: String) -> Button:
-	var b := Button.new()
-	b.text = txt
-	b.add_theme_font_override("font", _ui_font)
-	b.add_theme_font_size_override("font_size", 14)
-	return b
+	return panels.mk_btn(txt)
 
 
 # ---------- 小地图 / 好友方位 / 聊天 / 季节 ----------
@@ -6233,18 +6193,8 @@ func _open_hero_select(origin := "boot") -> void:
 	vb.add_child(back)
 
 
-## 角色卡片底框：角色主色的细边框，鼠标悬停时加亮
 func _hero_card_style(c: Color, hot: bool) -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.14, 0.17, 0.22, 0.96) if not hot else Color(0.19, 0.23, 0.3, 0.98)
-	sb.border_color = Color(c.r, c.g, c.b, 1.0 if hot else 0.55)
-	sb.set_border_width_all(2 if hot else 1)
-	sb.set_corner_radius_all(8)
-	sb.content_margin_left = 8
-	sb.content_margin_right = 8
-	sb.content_margin_top = 6
-	sb.content_margin_bottom = 8
-	return sb
+	return panels.hero_card_style(c, hot)
 
 
 ## 单张角色卡：顶部色条 + 站立立绘 + 名字 + 被动 / 主动两段说明 + 选择按钮
@@ -6324,16 +6274,8 @@ func _hero_card(i: int) -> Control:
 	return card
 
 
-## 选择按钮：用角色主色铺底，悬停略亮
 func _hero_btn_style(c: Color, hot: bool) -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(c.r, c.g, c.b, 0.92 if hot else 0.78)
-	sb.border_color = Color(1, 1, 1, 0.35)
-	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(6)
-	sb.content_margin_top = 6
-	sb.content_margin_bottom = 6
-	return sb
+	return panels.hero_btn_style(c, hot)
 
 
 
@@ -6383,210 +6325,45 @@ func _close_hero_select() -> void:
 
 # ---------- 世界存档选择页 ----------
 
-## 标题页信息行文案
+## 实现已迁入 scripts/ui/panels.gd；保留同名薄转发壳，main 内调用点不变
 func _boot_info_text() -> String:
-	var used := Save.used_slots()
-	if used == 0:
-		return "还没有世界存档，新建一个世界开始吧"
-	return "已有 %d 个世界存档（共 %d 个存档位）" % [used, Save.SLOT_COUNT]
+	return panels.boot_info_text()
 
 
-## 存档选择面板：6 个世界存档位，可进入 / 删除 / 在空位新建
 func _open_save_select() -> void:
-	if _save_panel != null:
-		return
-	get_tree().paused = true
-	if _boot_panel != null:
-		_boot_panel.visible = false
-	_save_dim = ColorRect.new()
-	_save_dim.color = Color(0.02, 0.03, 0.05, 0.62)
-	_save_dim.mouse_filter = Control.MOUSE_FILTER_STOP
-	_save_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	$UI.add_child(_save_dim)
-	_save_panel = PanelContainer.new()
-	_save_panel.process_mode = Node.PROCESS_MODE_ALWAYS
-	_save_panel.anchor_left = 0.5
-	_save_panel.anchor_top = 0.5
-	_save_panel.anchor_right = 0.5
-	_save_panel.anchor_bottom = 0.5
-	_save_panel.offset_left = -430.0
-	_save_panel.offset_top = -272.0
-	_save_panel.offset_right = 430.0
-	_save_panel.offset_bottom = 272.0
-	_save_panel.add_theme_stylebox_override("panel", _modal_style())
-	$UI.add_child(_save_panel)
-	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 8)
-	_save_panel.add_child(vb)
-	var pad := Control.new()
-	pad.custom_minimum_size = Vector2(800, 0)
-	vb.add_child(pad)
-	var title := _mk_label("世 界 存 档", 28)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vb.add_child(title)
-	var sub := _mk_label("共 %d 个存档位 · 进入一个世界继续，或在空位新建" % Save.SLOT_COUNT, 12)
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.modulate = Color(1, 1, 1, 0.72)
-	vb.add_child(sub)
-	var hr := HSeparator.new()
-	hr.modulate = Color(1, 1, 1, 0.22)
-	vb.add_child(hr)
-	_save_list = VBoxContainer.new()
-	_save_list.add_theme_constant_override("separation", 8)
-	vb.add_child(_save_list)
-	_refresh_save_list()
-	var back := _mk_btn("← 返回标题页")
-	back.custom_minimum_size = Vector2(220, 32)
-	back.add_theme_font_size_override("font_size", 13)
-	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	back.pressed.connect(func() -> void: _close_save_select())
-	vb.add_child(back)
+	panels.open_save_select()
 
 
-## 重绘 6 个存档位卡片
 func _refresh_save_list() -> void:
-	if _save_list == null:
-		return
-	for c in _save_list.get_children():
-		c.queue_free()
-	for i in Save.SLOT_COUNT:
-		_save_list.add_child(_save_slot_card(i))
+	panels.refresh_save_list()
 
 
-## 单个存档位：左侧世界信息，右侧进入 / 删除（空位为新建）
 func _save_slot_card(i: int) -> Control:
-	var d := Save.slot_summary(i)
-	var empty := d.is_empty()
-	var card := PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.13, 0.16, 0.21, 0.95)
-	sb.border_color = Color(0.42, 0.48, 0.58, 0.5 if empty else 0.85)
-	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(8)
-	sb.content_margin_left = 14
-	sb.content_margin_right = 14
-	sb.content_margin_top = 8
-	sb.content_margin_bottom = 8
-	card.add_theme_stylebox_override("panel", sb)
-	card.custom_minimum_size = Vector2(0, 62)
-	var hb := HBoxContainer.new()
-	hb.add_theme_constant_override("separation", 10)
-	card.add_child(hb)
-	var info := VBoxContainer.new()
-	info.add_theme_constant_override("separation", 2)
-	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hb.add_child(info)
-	if empty:
-		var t0 := _mk_label("%d 号世界 · 空白" % (i + 1), 17)
-		t0.modulate = Color(1, 1, 1, 0.55)
-		info.add_child(t0)
-		var t1 := _mk_label("还没有世界，点右侧「新建世界」开始", 12)
-		t1.modulate = Color(1, 1, 1, 0.45)
-		info.add_child(t1)
-		var b_new := _mk_btn("新建世界")
-		b_new.custom_minimum_size = Vector2(120, 34)
-		b_new.add_theme_font_size_override("font_size", 14)
-		b_new.pressed.connect(func() -> void: _new_slot(i))
-		hb.add_child(b_new)
-		return card
-	var hid := clampi(int(d.get("hero_id", 0)), 0, Game.HEROES.size() - 1)
-	var hero: Dictionary = Game.HEROES[hid]
-	var c: Color = hero.color
-	var t := _mk_label("%d 号世界 · %s" % [i + 1, hero.name], 17)
-	t.add_theme_color_override("font_color", c)
-	info.add_child(t)
-	var line := _mk_label("%s · %d 金币" % [_slot_date_text(d), int(d.get("gold", 0))], 12)
-	line.modulate = Color(1, 1, 1, 0.8)
-	info.add_child(line)
-	var saved := int(d.get("saved_at", 0))
-	var tl := "上次保存：%s" % _fmt_time(saved) if saved > 0 else "尚未保存"
-	var t2 := _mk_label(tl, 11)
-	t2.modulate = Color(1, 1, 1, 0.5)
-	info.add_child(t2)
-	var b_in := _mk_btn("进入")
-	b_in.custom_minimum_size = Vector2(84, 34)
-	b_in.add_theme_font_size_override("font_size", 14)
-	b_in.add_theme_stylebox_override("normal", _hero_btn_style(c, false))
-	b_in.add_theme_stylebox_override("hover", _hero_btn_style(c, true))
-	b_in.add_theme_stylebox_override("pressed", _hero_btn_style(c, true))
-	b_in.pressed.connect(func() -> void: _enter_slot(i))
-	hb.add_child(b_in)
-	var b_del := _mk_btn("确认删除？" if _save_confirm == i else "删除")
-	b_del.custom_minimum_size = Vector2(100, 34)
-	b_del.add_theme_font_size_override("font_size", 13)
-	b_del.pressed.connect(func() -> void: _delete_slot(i))
-	hb.add_child(b_del)
-	return card
+	return panels.save_slot_card(i)
 
 
-## 存档日期 → 「第 12 天 · 春季第 12 天」
 func _slot_date_text(d: Dictionary) -> String:
-	var day := int(d.get("day", 1))
-	var idx := int(floor((day - 1) / float(Game.SEASON_DAYS))) % Game.SEASONS.size()
-	var sd := (day - 1) % Game.SEASON_DAYS + 1
-	return "第 %d 天 · %s季第 %d 天" % [day, String(Game.SEASONS[idx].name), sd]
+	return panels.slot_date_text(d)
 
 
-## 时间戳 → 「10-30 21:05」
 func _fmt_time(unix: int) -> String:
-	if unix <= 0:
-		return "—"
-	var dt := Time.get_datetime_dict_from_unix_time(unix)
-	return "%02d-%02d %02d:%02d" % [int(dt.month), int(dt.day), int(dt.hour), int(dt.minute)]
+	return panels.fmt_time(unix)
 
 
-## 进入指定世界：切槽、读档、收掉面板开局
 func _enter_slot(i: int) -> void:
-	Save.current = i
-	Save.set_setting("last_slot", i)
-	_save_confirm = -1
-	_close_save_select(false)
-	if not _do_load(false):
-		_toast("这个存档读取失败了……")
-		get_tree().paused = false
-		return
-	_last_season = Game.season_index()
-	_apply_season_tint()
-	chunks.update_around(player.position, true)
-	_boot_finish(false)
-	Sfx.play("pick")
-	_toast("已进入 %d 号世界 · 第 %d 天 · %s" % [i + 1, Game.day, Game.hero().name])
+	panels.enter_slot(i)
 
 
-## 空位新建：记下预选槽，进入选角
 func _new_slot(i: int) -> void:
-	_pending_slot = i
-	_save_confirm = -1
-	_open_hero_select("save")
+	panels.new_slot(i)
 
 
-## 删除世界：首次点变「确认删除？」，再点才真删
 func _delete_slot(i: int) -> void:
-	if _save_confirm != i:
-		_save_confirm = i
-		_refresh_save_list()
-		return
-	_save_confirm = -1
-	Save.erase_slot(i)
-	_refresh_save_list()
-	_toast("%d 号世界已删除" % (i + 1))
+	panels.delete_slot(i)
 
 
-## 关闭存档页：回到标题页或直接继续游戏
 func _close_save_select(restore_boot := true) -> void:
-	if _save_panel != null:
-		_save_panel.queue_free()
-		_save_panel = null
-	if _save_dim != null:
-		_save_dim.queue_free()
-		_save_dim = null
-	_save_list = null
-	_save_confirm = -1
-	if restore_boot and _boot_panel != null:
-		_boot_panel.visible = true
-		_boot_status.text = _boot_info_text()
-	elif restore_boot:
-		get_tree().paused = false
+	panels.close_save_select(restore_boot)
 
 
 func _boot_host() -> void:
@@ -6782,47 +6559,19 @@ func _build_bag() -> void:
 
 
 func _modal_style() -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.08, 0.1, 0.14, 0.97)
-	sb.border_color = Color(0.38, 0.5, 0.68, 0.85)
-	sb.set_border_width_all(2)
-	sb.set_corner_radius_all(12)
-	sb.set_content_margin_all(16)
-	sb.shadow_color = Color(0, 0, 0, 0.45)
-	sb.shadow_size = 10
-	return sb
+	return panels.modal_style()
 
 
 func _bag_side_style() -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.12, 0.15, 0.2, 0.95)
-	sb.border_color = Color(0.3, 0.4, 0.55, 0.6)
-	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(8)
-	sb.set_content_margin_all(12)
-	return sb
+	return panels.bag_side_style()
 
 
-## 背包格子底框：分类色细边框，选中/悬停时边框更亮
 func _bag_cell_style(c: Color, sel: bool, hot: bool) -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.24, 0.3, 0.4, 0.98) if sel else Color(0.15, 0.18, 0.23, 0.96)
-	sb.border_color = Color(c.r, c.g, c.b, 1.0 if sel else (0.85 if hot else 0.5))
-	sb.set_border_width_all(2 if sel else 1)
-	sb.set_corner_radius_all(6)
-	sb.set_content_margin_all(4)
-	return sb
+	return panels.bag_cell_style(c, sel, hot)
 
 
 func _bag_cat_color(cat: String) -> Color:
-	match cat:
-		"crop": return Color(0.55, 0.82, 0.52)
-		"seed": return Color(0.86, 0.8, 0.45)
-		"fish": return Color(0.5, 0.72, 0.95)
-		"ore": return Color(0.95, 0.7, 0.45)
-		"mat": return Color(0.82, 0.74, 0.62)
-		"food": return Color(0.95, 0.62, 0.67)
-	return Color(0.75, 0.8, 0.88)
+	return panels.bag_cat_color(cat)
 
 
 ## 打开/关闭背包：暂停世界、压暗背景，关掉时恢复
@@ -6881,14 +6630,7 @@ func _refresh_bag() -> void:
 
 
 func _bag_tab_style(active: bool) -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.3, 0.48, 0.68, 0.95) if active else Color(0.14, 0.17, 0.22, 0.9)
-	sb.border_color = Color(1, 1, 1, 0.25)
-	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(5)
-	sb.content_margin_top = 4
-	sb.content_margin_bottom = 4
-	return sb
+	return panels.bag_tab_style(active)
 
 
 ## 背包全部条目：作物仓 / 种子袋 / 材料鱼矿加工品料理，按售价从高到低
