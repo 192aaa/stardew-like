@@ -121,7 +121,7 @@ offset_left = 20.0
 offset_top = 14.0
 offset_right = 900.0
 offset_bottom = 42.0
-text = "1-4 切换工具 · 空格 / 左键 使用 · E 互动"
+text = "1-0 切换工具 · 空格 / 左键 使用 · E 互动"
 
 [node name="DayTime" type="Label" parent="UI"]
 theme_override_fonts/font = SubResource("font_cjk")

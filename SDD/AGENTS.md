@@ -39,4 +39,4 @@
 
 ## R5 环境基线
 
-Godot 4.7 / GDScript / `gl_compatibility` / 1280×720；仓库根 `StardewLike/`；基线提交 `3899548`；工作区含大量未提交变更（见 `spec.md` §2）。
+Godot 4.7 / GDScript / `gl_compatibility` / 1280×720；仓库根 `StardewLike/`；基线提交 `dcd502d`（与 `origin/main` 一致，2026-11-05 刷新）；当前工作区状态见 `spec.md` §2。

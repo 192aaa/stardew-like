@@ -12,6 +12,22 @@ const BASE_R := 95.0
 const KNOB_R := 42.0
 const DEAD := 0.16                         # 摇杆死区（比例）
 
+## 动作 → 中文标签：触屏菜单与 main.gd 帮助面板共用的唯一文案真源。
+## 键位真源是 project.godot 的 InputMap（帮助面板经 main._key_cap 动态读取）。
+const ACTION_LABELS := {
+	"bag": "背包", "goals": "目标", "harvest_all": "收获全部",
+	"till_all": "一键开垦", "plant_all": "一键种植", "water_all": "浇水全部",
+	"aoe_toggle": "范围切换", "build": "建造", "craft": "制作", "codex": "图鉴",
+	"bundle": "收集包", "help": "帮助", "chat": "聊天", "minimap": "地图",
+	"save_game": "存档", "load_game": "读档",
+}
+## 触屏菜单显示顺序（键必须在 ACTION_LABELS 中）
+const MENU_ORDER := [
+	"bag", "goals", "harvest_all", "till_all", "plant_all", "water_all",
+	"aoe_toggle", "build", "craft", "codex", "bundle", "help",
+	"chat", "minimap", "save_game", "load_game",
+]
+
 var JOY_AREA := Rect2(0, 290, 330, 280)    # 摇杆感应区（画布坐标，外扩 24px 判定）
 var BASE := Vector2(150, 470)              # 摇杆底座中心
 
@@ -111,20 +127,13 @@ func _build_menu() -> void:
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 6)
 	_menu.add_child(vb)
-	for item in [
-		["背包", "bag"], ["目标", "goals"], ["收获全部", "harvest_all"],
-		["一键开垦", "till_all"], ["一键种植", "plant_all"], ["浇水全部", "water_all"],
-		["范围切换", "aoe_toggle"], ["建造", "build"],
-		["制作", "craft"], ["图鉴", "codex"], ["收集包", "bundle"], ["帮助", "help"],
-		["聊天", "chat"], ["地图", "minimap"], ["存档", "save_game"],
-		["读档", "load_game"],
-	]:
+	for key in MENU_ORDER:
+		var act: String = key
 		var b := Button.new()
-		b.text = item[0]
+		b.text = ACTION_LABELS[act]
 		b.custom_minimum_size = Vector2(120, 30)
 		b.add_theme_font_override("font", main._ui_font)
 		b.add_theme_font_size_override("font_size", 14)
-		var act: String = item[1]
 		# 只在菜单仍打开时响应：触屏+模拟鼠标双触发时第二次会自动忽略
 		b.pressed.connect(func() -> void:
 			if _menu_open:

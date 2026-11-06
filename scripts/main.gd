@@ -1,5 +1,5 @@
 extends Node2D
-## 主场景逻辑：昼夜循环、天气（晴/雨）、八种工具（锄/壶/种子x4/鱼竿/斧镐）、体力系统、
+## 主场景逻辑：昼夜循环、天气（晴/雨）、十种工具（锄/壶/种子x6/鱼竿/斧镐）、体力系统、
 ## 钓鱼小游戏、村民对话与好感度、商店（种子/作物/鱼/材料/工具升级）、制作与放置、HUD 提示
 
 const DAY_START_MIN := 6 * 60
@@ -1328,6 +1328,11 @@ func _sell_price(base: int) -> int:
 
 # ---------- 存档与读档 ----------
 
+## 存档载荷 schema 版本：v1 = 历史上不带 "v" 的存档，v2 = 当前显式带版本的载荷。
+## 两版数据字段集合相同，v2 只多一个版本标记；存储键名 stardew_save_v1 保持不变。
+const SAVE_VERSION := 2
+const SAVE_VERSION_V1 := 1
+
 ## 组装进度：Game 全局 + 时间/工具 + 玩家位置 + 农田地块与放置物 + 订单/鸡/宠物/图鉴/成就
 func _save_payload() -> Dictionary:
 	var tiles: Array = []
@@ -1353,6 +1358,7 @@ func _save_payload() -> Dictionary:
 	# 在矿洞里存档：位置记成洞口（读档总是回到地面农场）
 	var save_pos: Vector2 = _mine_return_pos if in_mine else player.position
 	return {
+		"v": SAVE_VERSION,
 		"day": Game.day, "gold": Game.gold, "hero_id": Game.hero_id,
 		"saved_at": int(Time.get_unix_time_from_system()),
 		"seeds": Game.seeds, "harvest": Game.harvest, "items": Game.items,
@@ -1391,7 +1397,29 @@ func _save_payload() -> Dictionary:
 	}
 
 
+## 按载荷 "v" 分派迁移；缺省（历史存档不带 v）视为 v1，沿用既有 d.get(key, default) 默认值逻辑。
+## 版本递增时在此 match 增加逐版本迁移函数，不要直接改字段默认值。
+func _migrate_payload(d: Dictionary) -> Dictionary:
+	var v := int(d.get("v", SAVE_VERSION_V1))
+	match v:
+		SAVE_VERSION_V1:
+			return _migrate_v1_to_v2(d)
+		SAVE_VERSION:
+			return d
+		_:
+			push_warning("未知存档版本 v=%d，按当前字段默认值尽力读取" % v)
+			return d
+	return d
+
+
+## v1 → v2：数据字段集合与取值完全不变，只补版本标记；旧档读入沿用全部默认值逻辑
+func _migrate_v1_to_v2(d: Dictionary) -> Dictionary:
+	d["v"] = SAVE_VERSION
+	return d
+
+
 func _apply_payload(d: Dictionary) -> void:
+	d = _migrate_payload(d)
 	_loading = true
 	if Net.is_guest():
 		# 联机：guest 的位置与工具选择本地保留，其余以 host 全量为准
@@ -4592,7 +4620,9 @@ func _build_help() -> void:
 	_help_section(col_l, "基础操作", [
 		"WASD / 方向键 移动　　空格 / 鼠标左键 使用工具　　E 互动",
 		"1-0 切换工具　　I 背包　　C 制作　　V 建造　　H 帮助　　Esc 设置 / 关闭　　F5 存档 / F9 读档　　M 音乐",
-		"J 收获 / K 浇水 / F 开垦 / P 种植：默认玩家附近 3×3，按 G 切换全田",
+		"J 收获 / K 浇水 / F 开垦 / P 种植：默认附近 3×3，按 %s %s；%s 打开%s" % [
+			_key_cap("aoe_toggle"), TouchScript.ACTION_LABELS["aoe_toggle"],
+			_key_cap("codex"), TouchScript.ACTION_LABELS["codex"]],
 		"R 花钱传送（每次 200g）",
 		"Tab 小地图放大缩小（也能直接点小地图）　　T 和联机好友打字聊天",
 	])
@@ -4682,6 +4712,18 @@ func _help_section(vb: VBoxContainer, title: String, lines: Array) -> void:
 	vb.add_child(t)
 	for line in lines:
 		vb.add_child(_mk_label(line, 13))
+
+
+## 从 InputMap 读取动作的首个键盘键帽文字：键位唯一真源是 project.godot，
+## 帮助面板据此生成说明，改键位时不必再改文案
+func _key_cap(action: String) -> String:
+	for e in InputMap.action_get_events(action):
+		if e is InputEventKey:
+			var kc: int = e.physical_keycode
+			if kc == 0:
+				kc = e.keycode
+			return OS.get_keycode_string(kc).trim_prefix("Key")
+	return "?"
 
 
 func _toggle_help(open: bool) -> void:
