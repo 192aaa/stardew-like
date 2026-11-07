@@ -33,8 +33,8 @@
 | T1.1 | C2 | 修 `aoe_toggle` 键位冲突 + 键位常量 + 文案漂移 | `project.godot`, `scripts/main.gd`, `scenes/main.tscn`, `scripts/touch_controls.gd` | C2-AC1~3 | T0.3 | **已验收（2026-11-05）** |
 | T1.2 | C3 | 存档载荷加 `v: 2` 与迁移分派 | `scripts/main.gd`, `scripts/save.gd` | C3-AC1~3 | T0.3 | **已验收（2026-11-05）** |
 | T1.3 | C4 | 建 `tests/run.gd` 与首批 6 条断言 | `tests/run.gd`, `README.md` | C4-AC1~3 | T1.2 | **已验收（2026-11-06，人类认可覆盖口径）** |
-| T2.1 | C5-① | 抽出 UI 面板控制器（低耦合先行） | `scripts/main.gd` → `scripts/ui/` | C5-AC2~4 | T1.3 | **待验收（见记录 #15）** |
-| T2.1b | C5-①b | 继续把剩余 UI 面板（商店/制作/背包/设置/图鉴/帮助/标题/选角等）迁入 `scripts/ui/panels.gd` | `scripts/main.gd`, `scripts/ui/panels.gd` | C5-AC2~4 | T2.1 | 阻塞 |
+| T2.1 | C5-① | 抽出 UI 面板控制器（低耦合先行） | `scripts/main.gd` → `scripts/ui/` | C5-AC2~4 | T1.3 | **已验收（2026-11-06，见记录 #16）** |
+| T2.1b | C5-①b | 继续把剩余 UI 面板（商店/制作/背包/设置/图鉴/帮助/标题/选角等）迁入 `scripts/ui/panels.gd` | `scripts/main.gd`, `scripts/ui/panels.gd` | C5-AC2~4 | T2.1 | **进行中（2026-11-06 放行，见记录 #17）** |
 | T2.2 | C5-② | 抽出钓鱼状态机，处理 `3: pass` | `scripts/main.gd` → `scripts/fishing.gd` | C5-AC2~4 | T2.1 | 阻塞 |
 | T2.3 | C5-③ | 抽出商店 / 制作建造 | `scripts/main.gd` → `scripts/shop.gd`, `scripts/craft.gd` | C5-AC2~4 | T2.2 | 阻塞 |
 | T2.4 | C5-④ | 抽出联机同步与能力表 | `scripts/main.gd` → `scripts/net_sync.gd` | C5-AC2~4 | T2.3 | 阻塞 |
@@ -63,6 +63,29 @@
 | 13 | T1.3 / T2.1 | 2026-11-06 | 人类裁决：**认可 C4 覆盖口径，T1.3 验收通过，放行 T2.1** | T1.3 转「已验收」；T2.1 转「进行中」。代理完成前置探索后按 R4 停下，待裁决拆分范围与提交检查点，见「T2.1 前置探索」 | 尚未改动任何游戏代码 |
 | 14 | T2.1 | 2026-11-06 | 人类裁决：**授权提交，低耦合先行，AC2 用等效方法**（方案 A） | 按 R2 显式授权 `git commit`；检查点 `cdf26bc`（9 文件 +709/−47）先固化 T1.1~T1.3；T2.1 只抽低耦合面板，剩余登记 T2.1b；AC2 改用静态解析 + 临时 autoload 探针 | 提交遇到 git 未配身份，改用进程级环境变量沿用 `dcd502d` 既有作者，未改 git config、未 push |
 | 15 | T2.1 | 2026-11-06 | 执行完成，待验收 | 见下方「T2.1 验收证据」 | 只改 2 个登记位置：`scripts/main.gd` + 新建 `scripts/ui/panels.gd` |
+| 16 | T2.1 | 2026-11-06 | 人类裁决：**T2.1 验收通过**（用户「T2.1可以」） | 依据记录 #15：AC2 静态 64 键 `identical=True` + 真实主场景运行时 64 键、`v=2`、CSV 逐字相同；AC3/AC4 通过；C4 回归 `cases=7 pass=24 fail=0`、headless `exit=0`、`read_lints` 0 诊断。冒烟 #2/#5/#6/#7 如实标注未执行，不推断通过。成果已提交 `8109f75` | 按 R0 停下，未放行 T2.1b 或任何后续任务；未授权提交 Spec Kit 改动 |
+| 17 | T2.1b | 2026-11-06 | 人类裁决：**放行 T2.1b**（用户「继续吧」，附 `SDD/plan.md`） | 承接记录 #16 的 T2.1 验收；按 R0 只放行一个任务，T2.1b 由「阻塞」转「进行中」，其余 T2.2~T3.2 保持阻塞 | 先产出 Spec Kit 功能规格 `specs/001-migrate-ui-panels/spec.md`，完成后停下等待裁决 |
+| 18 | T2.1b 规格 | 2026-11-06 | 人类裁决：**规格通过**（用户「规格通过」） | `specs/001-migrate-ui-panels/spec.md` 及其质量清单通过验收；清单中 4 项「与通用模板冲突」的未通过项按备注第 1/4 条作为已知约束保留 | 按流程跳过 `/speckit.clarify`（无待澄清标记），进入 `/speckit.plan`；完成后按 R0 停下 |
+| 19 | T2.1b 计划 | 2026-11-06 | 人类裁决：**技术计划通过**（用户「计划通过」） | `specs/001-migrate-ui-panels/plan.md` 及 Phase 0/1 工件（`research.md`、`data-model.md`、`quickstart.md`）通过验收；宪法检查在 Phase 0 前与 Phase 1 后均无违规 | 按上一步约定跳过可选 `/speckit.checklist`，进入 `/speckit.tasks`；完成后按 R0 停下 |
+| 20 | T2.1b 任务清单 | 2026-11-06 | 人类裁决：**任务清单通过**（用户「任务清单通过」） | `specs/001-migrate-ui-panels/tasks.md` 通过验收：24 条任务（T001~T024）、US1 7 / US2 4 / US3 4、5 个 [P]、ID 唯一连续、全部含精确文件路径 | 按上一步约定先执行只读的 `/speckit.analyze` 自检；动代码前需再次确认放行范围，本步不改游戏代码 |
+| 21 | T2.1b 规格补丁 | 2026-11-06 | 人类指令：**补 CHK002 类缺口**（用户「先补 CHK002 类缺口」） | `spec.md` 新增 FR-008 与「失败与回退处理」小节，消除 CHK002 指出的「迁移失败回退策略」需求空白；`refactor-safety.md` CHK002 由 [Gap] 转为已定义待评审 | 缺口已补，规格仍视为 #18 通过状态；下一步为 `/speckit.implement` 明确放行 |
+| 22 | T2.1b 迁移完成 | 2026-11-07 | 人类裁决：**直接放行 implement**（用户「直接放行 implement」） | 完成 T008~T014 代码迁移与 T015~T024 验证；15 个面板函数迁入 `panels.gd`、`main.gd` 保留同名薄转发壳；T015 `pass=24 fail=0`、T016 headless `EXIT=0 errors=0`、T019 64 键 `v=2` 620 字符，全部无回归 | 代码改动仅限两登记文件（可 git 整体还原）；下一步按 R0 停下，等待人类对 T2.1b 的验收裁决，不预做 T2.2 |
+
+### 验收证据（记录 #22）：T2.1b 迁移完成（2026-11-07）
+- **代码改动**：`scripts/main.gd` `git diff --numstat` = `30 / 933`；`scripts/ui/panels.gd` = `973 / 1`；主脚本 **6801 → 5898** 行，控制器 **384 → 1356** 行。
+- **FR-001 迁移范围**：商店/制作/背包/设置/图鉴/帮助/标题/选角 共 **15** 个面板构造函数迁入 `panels.gd`（`scripts/ui/panels.gd:9-25` 文件头接口清单）；存档 `_save_payload()` 与交易 `_buy`/`_sell` 等玩法逻辑未迁。
+- **FR-002 薄转发壳**：`main.gd` 中 `panels.*` 转发调用 **38** 处 ↔ `panels.gd` 对外 `func` **38** 个，一一对应（T012 实测）；main 内部既有调用点零改动。
+- **FR-003 状态留 main**：`scripts/touch_controls.gd:216-223` 读取的 16 个状态引用未迁移，组合链保持不断。
+- **FR-004 不复制玩法数值**：常量（如 `main.BAG_TABS`）经 `main.<member>` 访问，未复制到控制器。
+- **FR-005 保存载荷不变（C5-AC2 子集）**：T019 临时只读探针运行时确认 `_save_payload()` 仍为 **64 键 / `v=2` / CSV 620 字符**，与 T004/T005 基线逐字相同；`project.godot` 已字节级还原、探针已删。
+- **FR-006 玩法逻辑留 main**：`_save_payload()`、交易/升级等玩法函数仍驻 `main.gd`。
+- **FR-007 / T024 停下裁决**：本步完成后停止，不预做 T2.2。
+- **FR-008 回退能力**：改动仅限两登记文件，可由 `git checkout` 整体还原至本步起点。
+- **C5-AC2 无回归**：T015 `godot --headless --script tests/run.gd` → `RESULT cases=7 pass=24 fail=0`（退出码 0）；T016 `godot --headless --quit-after 150` → `EXIT=0` 且 SCRIPT/PARSE/COMPILE/IDENTIFIER 错误命中 **0**。
+- **C5-AC3 文件头接口清单**：`scripts/ui/panels.gd:9-25` 列全对外接口与「不持有状态、不复制玩法数值」说明。
+- **C5-AC4 挂载顺序**：`scripts/main.gd:392-395` 在 `_ready()` 最早处 `panels = PanelsScript.new(); panels.main = self; add_child(panels)`，早于首个 `_build_shop()`（L402）。
+- **T017 / T023 lint**：GDScript 不受 `read_lints` 工具支持，等价编译诊断由 T016（godot 编译+运行）覆盖，0 错误；`git diff --check` 通过（仅 CRLF 提示，与基线一致，非本步引入）。
+- **T018 GUI 冒烟**：本环境无显示器，按 R3 如实标注「**未执行**」，不推断通过。
 
 ### 补跑证据（记录 #6）
 
@@ -245,12 +268,12 @@ C5-AC1「`main.gd` ≤ 3000 行」是 5 步阶段终点（`docs/AS-IS-baseline.m
 T0.0 ~ T0.3       = 已验收
 T1.1 ~ T1.2       = 已验收（2026-11-05）
 T1.3              = 已验收（2026-11-06，覆盖口径经人类认可）
-T2.1              = 待验收（AC2~4 通过，见记录 #15）
-T2.1b             = 阻塞（新增：剩余 UI 面板迁移，依赖 T2.1 验收）
+T2.1              = 已验收（2026-11-06，人类裁决，见记录 #16；成果提交 8109f75）
+T2.1b             = 进行中（2026-11-06 放行，见记录 #17）
 T2.2 ~ T3.2       = 阻塞
-进行中任务         = 无（R0：T2.1 已停下待验收）
-未提交改动         = T2.1 成果按 C5 SHALL 单独提交：SDD/plan.md、scripts/main.gd、scripts/ui/panels.gd；
-                    提交完成后以 `git status --short` 为准应为空
+进行中任务         = T2.1b（R0：只此一个）
+未提交改动         = Spec Kit 脚手架：.gitignore、.codebuddy/、.specify/、specs/（按 R2 待授权提交）；
+                    游戏代码无未提交改动（T2.1 成果见 8109f75）
 ```
 
-**当前等待**：T2.1 的人类验收裁决（证据见记录 #15）。记录 #13 的三处冲突已由记录 #14 裁决并执行完毕（授权提交 / 低耦合先行 / AC2 等效方法），检查点 `cdf26bc` 已建立。验收前不预做 T2.1b、T2.2 或任何后续任务（R0）；冒烟 #2/#5/#6/#7 已在证据中如实标注为未执行，不推断通过。
+**当前等待**：T2.1b 迁移已执行完成（记录 #22：15 个面板函数迁入 `panels.gd`、`main.gd` 保留同名薄转发壳，T015 `pass=24 fail=0`、T016 headless `EXIT=0 errors=0`、T019 64 键 `v=2` 620 字符，全部无回归）。按 **R0 停下**，等待人类对 T2.1b 的验收裁决，不预做 T2.2 或任何后续任务；提交动作需按 **R2** 取得人类明确授权后执行，未获授权则保持未提交。记录 #13 的三处冲突已由记录 #14 裁决并执行完毕（授权提交 / 低耦合先行 / AC2 等效方法），检查点 `cdf26bc` 已建立；T2.1 由记录 #16 验收通过，T2.1b 由记录 #17 放行、记录 #22 验收完成。冒烟 #2/#5/#6/#7 已在证据中如实标注为未执行，不推断通过。

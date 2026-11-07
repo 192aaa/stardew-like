@@ -17,3 +17,9 @@ node_modules/
 # 本地调试截图 / 录音（含 Godot .import 伴生文件）
 tools/shot*.png*
 tools/shot*.wav*
+
+# CodeBuddy agent folder may contain credentials or machine-local state.
+# Ignore it, but keep the Spec Kit slash commands in version control.
+.codebuddy/*
+!.codebuddy/commands/
+!.codebuddy/commands/*.md
